@@ -1,0 +1,80 @@
+# Example settings of experiments-handler (version 3), copied to the --config path when it does not exist yet.
+# The page edits this file; the previous version is kept as <file>.bak. Hand edits are fine ("Reload config").
+#
+# project     root: the project the scripts run in (absolute, or relative to this file); scripts_dir: where the
+#             generated scripts go (<scripts_dir>/<XP>/); src_dir: scanned for the classes of the argument browser;
+#             env_prefix / env_sep: how config fields map to environment variables (APP_TASK__INIT_ARGS__LR);
+#             config_var / commit_var: the variables holding the base config and the git commit; tracking_uri: MLflow
+# variables   docker / run / process: name, label, value, options, env (true: passed to the container with -e;
+#             names starting with env_prefix always are)
+# loop        options: command loops (shell text put at @@LOOP@@ in the template); env: variables set inside the
+#             loop at @@LOOP_ENV@@
+# servers     GPU servers of the GPU view (name, host, port, user), reached with ssh
+# xps         an XP: its ordered blocks (id, label, path: prefix of the variable names, rows: options setting variables)
+version: 3
+project:
+  root: .
+  scripts_dir: scripts
+  src_dir: src
+  env_prefix: APP_
+  env_sep: __
+  config_var: CONFIG
+  commit_var: COMMIT
+  tracking_uri: mlruns
+variables:
+  docker:
+  - name: IMAGE_NAME
+    label: Docker image
+    value: python:3.12
+    options: []
+    env: false
+  - name: CONFIG
+    label: Base config
+    value: configs/example.yaml
+    options: []
+    env: false
+  - name: COMMIT
+    label: Git commit
+    value: HEAD
+    options: []
+    env: false
+  - name: DEBUG
+    label: Debug (1 = attached, no checkout)
+    value: '0'
+    options: ['0', '1']
+    env: false
+  run:
+  - name: NB_RUNS
+    label: Number of runs
+    value: '1'
+    options: ['1', '3', '5']
+    env: false
+  process:
+  - name: APP_SETTINGS__SEED
+    label: Seed
+    value: $i
+    options: []
+    env: false
+loop:
+  options:
+  - name: repeated runs
+    value: |
+      for i in \$(seq 1 $NB_RUNS); do
+          @@LOOP_ENV@@
+          python main.py $CONFIG
+      done
+  env: []
+servers: []
+xps:
+- name: example
+  blocks:
+  - id: learning_rate
+    label: Learning rate
+    path: APP_TASK__INIT_ARGS__
+    rows:
+    - name: small
+      vars:
+        LR: '0.0001'
+    - name: large
+      vars:
+        LR: '0.001'

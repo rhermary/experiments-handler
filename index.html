@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XP launcher</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app" id="app">
+  <aside id="side" aria-label="Experiments">
+    <h2>Experiments</h2>
+    <ul id="xps"></ul>
+    <button class="ghost wide" id="newxp" type="button">+ New XP</button>
+    <div class="side-foot">
+      <button class="ghost wide" id="gpus" type="button" title="GPU usage on this machine">GPUs</button>
+    </div>
+  </aside>
+
+  <div class="content">
+    <header>
+      <button class="icon" id="toggle" type="button" aria-label="Toggle experiments panel" aria-expanded="true">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+      </button>
+      <h1>XP launcher</h1>
+      <span class="xpname" id="xpname"></span>
+      <button class="ghost" id="template" type="button">Template</button>
+      <button class="ghost" id="settings" type="button">Settings</button>
+      <button class="ghost" id="reload" type="button">Reload config</button>
+    </header>
+
+    <main>
+      <section>
+        <h2>Blocks<span class="hint">pick one option per block, scroll sideways for more</span><span class="scope-legend" id="scope-legend"></span></h2>
+        <div id="strip"></div>
+      </section>
+      <section id="vars" aria-label="Variables"></section>
+      <section>
+        <div class="pvbar">
+          <h2>Preview</h2>
+          <button class="ptab" id="tab-yaml" type="button" aria-pressed="true">Config</button>
+          <button class="ptab" id="tab-script" type="button" aria-pressed="false">Script</button>
+          <span class="legend" id="pv-legend"></span>
+        </div>
+        <div id="pv-yaml"></div>
+        <pre id="preview" hidden></pre>
+      </section>
+      <pre id="output" hidden></pre>
+    </main>
+
+    <div class="bar">
+      <span id="status" role="status"></span>
+      <button class="ghost" id="status-act" type="button" hidden></button>
+      <button id="generate" type="button">Generate script</button>
+      <button id="launch" class="primary" type="button">Launch</button>
+    </div>
+  </div>
+</div>
+
+<dialog id="dlg"><form id="dlgform"></form></dialog>
+
+<script src="/editors.js"></script>
+<script src="/app.js"></script>
+<script src="/argpicker.js"></script>
+<script src="/gpus.js"></script>
+<script src="/results.js"></script>
+<script src="/router.js"></script>
+</body>
+</html>

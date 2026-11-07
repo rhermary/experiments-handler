@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+# settings and files of a project (they live in the project, next to its experiments.yaml)
+experiments.yaml
+experiments.yaml.*
+template.sh
+userlist.csv
+.gpu-servers.json
+.mlflow-server.log
