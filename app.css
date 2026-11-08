@@ -882,3 +882,6 @@ body.tab-databases main > section:not(#databasestab), body.tab-databases main > 
 .db-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .db-opt { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--mute); }
 @media (max-width: 700px) { .db-secs { grid-template-columns: minmax(0, 1fr); } }
+
+.db-warn { margin: 0; padding: 6px 10px; border-left: 3px solid var(--warn-ink, #93600a); background: var(--add-bg, #fbf3df); border-radius: 4px; font-size: 12.5px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.db-nosync { border-style: dashed; }

@@ -94,11 +94,10 @@ def status_steps(sv):
 # --------------------------------------------------------------------------- databases
 
 def _db(sv, which):
-    """(socket, port, folder pattern, label) of a server's own database or (central server) the synchronised one."""
+    """(socket, port, folder pattern, label) of a server's own database or its synchronised one (the central server's
+    is the one the syncs write to; any server can have one, e.g. to prepare a new central server)."""
     p = core.server_paths(sv)
     if which == "sync":
-        if not sv.get("central"):
-            raise ValueError(f"{sv['name']} is not the central server: it has no synchronised database")
         return p["sync_sock"], p["sync_port"], p["sync_db_pattern"], "synchronised database"
     return p["psql_sock"], p["pg_port"], p["db_pattern"], "own database"
 
@@ -116,7 +115,7 @@ def db_status_steps(sv):
              "'{{.Id}}|{{.Config.User}}|{{.State.StartedAt}}|{{.Config.Image}}|{{.Name}}|{{json .Config.Env}}|{{json .Config.Cmd}}' 2>/dev/null"
              f" | awk -F'|' -v u=\"$(id -u)\" '$2==u && ($0 ~ /server(-ssl)?\\.sh/ || $5 ~ /{SYNC_CONTAINER}/)'",
              f"echo @@EMPTY; test -d {q(p['empty_db'])} && echo yes || echo no"]
-    for which in (["own", "sync"] if sv.get("central") else ["own"]):
+    for which in ("own", "sync"):
         sock, port, pattern, _ = _db(sv, which)
         lines += [f"echo @@{which.upper()}_SOCK; test -S {q(sock)}/.s.PGSQL.{port} && echo running || echo stopped",
                   f"echo @@{which.upper()}_FOLDERS; ls -d {pattern} 2>/dev/null | sort",
@@ -148,7 +147,7 @@ def parse_db_status(sv, text):
                            "kind": kind, "cmd": cmd, "folder": env.get("FOLDER") or None,
                            "synched": env.get("SYNCHED") == "true", "allow_modif": env.get("ALLOW_MODIF") == "true"})
     out = {"empty_db": (sec.get("EMPTY") or ["no"])[0] == "yes", "containers": containers}
-    for which in (["own", "sync"] if sv.get("central") else ["own"]):
+    for which in ("own", "sync"):
         w = which.upper()
         out[which] = {"state": (sec.get(f"{w}_SOCK") or ["?"])[0], "folders": sec.get(f"{w}_FOLDERS", []),
                       "data_directory": (sec.get(f"{w}_DATADIR") or [None])[0],

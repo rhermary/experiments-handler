@@ -190,6 +190,13 @@
     const p = sv.paths_all;
     const key = `${sv.name}/${which}`;
     const title = which === 'own' ? 'Own database' : 'Synchronised database';
+    const notCentral = which === 'sync' && !sv.central
+      ? h('p', { class: 'db-warn' }, `${sv.name} is not the central server: syncs write to ${(listed().find((s) => s.central) || {}).name || 'no server yet'}. `,
+        h('button', { type: 'button', class: 'sv-btn', onclick: (ev) => {
+          const b = ev.currentTarget;
+          if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Click again to make it central'; b.classList.add('armed'); setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = 'Make it the central server'; b.classList.remove('armed'); } }, 4000); return; }
+          makeCentral(sv);
+        } }, 'Make it the central server')) : '';
     const where = which === 'own' ? `${p.psql_sock} · port ${p.pg_port}` : `${p.sync_sock} · port ${p.sync_port}`;
     if (!db) return h('div', { class: 'db-sec' }, h('div', { class: 'db-head' }, h('b', {}, title), h('code', { class: 'sv-path' }, where)),
       h('p', { class: 'hint' }, sv.connected ? 'Read the databases to see their state.' : 'Connect, then read the databases.'));
@@ -212,6 +219,7 @@
     const running = db.state === 'running';
     return h('div', { class: 'db-sec' },
       h('div', { class: 'db-head' }, h('b', {}, title), running ? pill('ok', 'running') : pill('bad', 'stopped'), h('code', { class: 'sv-path' }, where)),
+      notCentral,
       h('dl', { class: 'db-facts' },
         h('dt', {}, 'Folder in use'), h('dd', {}, inUse ? h('code', { class: 'sv-path', title: db.data_directory ? 'asked to Postgres (show data_directory)' : 'from the container' }, inUse) : h('span', { class: 'hint' }, running ? 'unknown' : 'none (stopped)')),
         h('dt', {}, 'Container'), h('dd', {}, c ? h('span', {}, h('code', {}, c.id), ` ${c.name} · ${c.image} · started ${c.started}`,
@@ -233,6 +241,30 @@
         actionButton(sv, 'db_sizes', 'Measure sizes', { disabled: !sv.connected || !folders.length, args: { which }, title: 'du on the folders (can take a while)' })));
   }
 
+  /* a synchronised database: on the central server always, elsewhere when one was found */
+  const hasSync = (sv) => sv.central || (sv.db?.sync && (sv.db.sync.folders.length || sv.db.sync.state === 'running'));
+
+  function noSync(sv) {
+    const p = sv.paths_all;
+    return h('div', { class: 'db-sec db-nosync' },
+      h('div', { class: 'db-head' }, h('b', {}, 'Synchronised database'), h('span', { class: 'hint' }, sv.db ? 'none on this server' : '')),
+      h('p', { class: 'hint' }, `Creates ${p.synchronised} (artifacts, checkpoints, socket) and copies ${base(p.empty_db)} to ${base(p.synchronised)}/db_<today>. `
+        + 'Make this server the central one afterwards to sync into it.'),
+      h('div', { class: 'db-acts' }, actionButton(sv, 'db_new', 'Create a synchronised database here', {
+        confirm: 'Click again to create it', args: { which: 'sync' }, after: 'read the databases again to see it',
+        disabled: !sv.connected || !sv.db || !sv.db.empty_db,
+        title: !sv.db ? 'Read the databases first' : sv.db.empty_db ? `a copy of ${p.empty_db}` : `${p.empty_db} not found on ${sv.name}` })));
+  }
+
+  async function makeCentral(sv) {
+    const before = (cfg.servers.find((s) => s.central) || {}).name;
+    try {
+      await commit((c) => { for (const s of c.servers) { if (s.name === sv.name) s.central = true; else delete s.central; } });
+      status(`${sv.name} is now the central server` + (before ? ` (was ${before}: its synchronised data stays there)` : ''));
+      load();
+    } catch (e) { status(e.message, true); }
+  }
+
   function dbCard(sv) {
     return h('div', { class: 'card sv-card db-card' + (sv.central ? ' central' : '') },
       h('div', { class: 'db-top' }, h('b', { class: 'db-name' }, sv.name), sv.central ? pill('ref', 'central') : '',
@@ -241,7 +273,7 @@
         sv.connected ? '' : actionButton(sv, 'connect', 'Connect', { primary: true }),
         actionButton(sv, 'db_status', 'Read the databases', { disabled: !sv.connected, title: 'Read-only: sockets, containers, folders, the folder in use' }),
         actionButton(sv, 'db_scripts', 'Show your scripts', { disabled: !sv.connected, title: `cat ${sv.paths_all.scripts}/launch-server.sh and server.sh` })),
-      h('div', { class: 'db-secs' }, dbSection(sv, 'own'), sv.central ? dbSection(sv, 'sync') : ''));
+      h('div', { class: 'db-secs' }, dbSection(sv, 'own'), hasSync(sv) ? dbSection(sv, 'sync') : noSync(sv)));
   }
 
   function paintDatabases(box) {
