@@ -202,7 +202,10 @@ def db_start_steps(sv, which, folder, allow_modif=False, image=""):
     script = "\n".join([
         f"docker image inspect {q(image)} >/dev/null 2>&1 || {{ echo '{image} is not on {sv['name']}: pull it first (Pull image)' >&2; exit 1; }}",
         f"bash {q(dest)}/launch.sh --image {q(image)} --name {CONTAINERS[which]} --label {which} \\",
-        f"  --folder {q(folder)} --socket {q(sock)} --port {port} --ui-port {ui}" + (" --allow-modif" if allow_modif else "")])
+        f"  --folder {q(folder)} --socket {q(sock)} --port {port} --ui-port {ui} \\",
+        # the folder of the runs' files, for the MLflow UI (read-only): the base folder (artifacts, older artifact
+        # folders) for a server's own database, the synchronised folder for the synchronised one
+        f"  --files {q(p['base'] if which == 'own' else p['synchronised'])}" + (" --allow-modif" if allow_modif else "")])
     return [ssh_script(f"make the folder of the launcher's database scripts on {sv['name']}", sv, f"mkdir -p {q(dest)}", timeout=30),
             actions.step(f"copy db/launch.sh and db/serve.sh to {dest}", scp, timeout=60),
             ssh_script(f"start the {label} of {sv['name']} on {folder.rsplit('/', 1)[-1]} ({image}, MLflow UI on port {ui})", sv, script, timeout=90)]
