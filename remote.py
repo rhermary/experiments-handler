@@ -120,12 +120,15 @@ def db_status_steps(sv, image=""):
              # the images on the server (of the same repository as the default one), to choose the one to start
              "echo @@IMAGES; docker images " + (q(image.rsplit(":", 1)[0]) + " " if image else "")
              + "--format '{{.Repository}}:{{.Tag}}|{{.CreatedSince}}|{{.Size}}' 2>/dev/null | grep -v '<none>'"]
+    # the database containers only (yours: server.sh, or the launcher's), to ask Postgres its folder
+    lines.append("DBC=$(docker ps -q | xargs -r docker inspect --format '{{.Id}}|{{.Config.User}}|{{.Name}}|{{json .Config.Cmd}}' 2>/dev/null"
+                 " | awk -F'|' -v u=\"$(id -u)\" '$2==u && ($4 ~ /server(-ssl)?\\.sh|serve\\.sh/ || $3 ~ /launcher-(synchronised-)?db/) {print $1}')")
     for which in ("own", "sync"):
         sock, port, pattern, _ = _db(sv, which)
         lines += [f"echo @@{which.upper()}_SOCK; test -S {q(sock)}/.s.PGSQL.{port} && echo running || echo stopped",
                   f"echo @@{which.upper()}_FOLDERS; ls -d {pattern} 2>/dev/null | sort",
                   f"echo @@{which.upper()}_DATADIR",
-                  f"for c in $(docker ps -q); do docker exec \"$c\" psql -h {q(sock)} -p {port} -U \"$(id -un)\" -d mlruns_db -Atc 'show data_directory' 2>/dev/null && break; done"]
+                  f"for c in $DBC; do docker exec \"$c\" psql -h {q(sock)} -p {port} -U \"$(id -un)\" -d mlruns_db -Atc 'show data_directory' 2>/dev/null | grep '^/' && break; done"]
     return [ssh_script(f"read the databases of {sv['name']} (read-only: sockets, containers, folders)", sv, "\n".join(lines + ["exit 0"]), timeout=60)]
 
 
@@ -161,7 +164,8 @@ def parse_db_status(sv, text):
     for which in ("own", "sync"):
         w = which.upper()
         out[which] = {"state": (sec.get(f"{w}_SOCK") or ["?"])[0], "folders": sec.get(f"{w}_FOLDERS", []),
-                      "data_directory": (sec.get(f"{w}_DATADIR") or [None])[0],
+                      # a path, or nothing (docker exec errors such as "OCI runtime exec failed" can come on stdout)
+                      "data_directory": next((ln for ln in sec.get(f"{w}_DATADIR", []) if ln.startswith("/")), None),
                       "container": next((c for c in containers if c["kind"] == which), None)}
     return out
 
