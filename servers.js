@@ -39,19 +39,53 @@
     } catch (e) { status(e.message, true); }
   }
 
-  async function run(server, action, args, after) {
+  async function run(server, action, args, after, quiet) {
     S.busy[server + action] = true; paint();
     try {
       const r = await api('/api/servers/run', { server, action, args });
       const i = listed().findIndex((x) => x.name === server);
       if (i >= 0) S.data.servers[i] = r.server;
+      if (quiet) { delete S.busy[server + action]; return r.result.ok; }
       status(`${r.result.title} ${r.result.ok ? 'done' : 'failed'}${after && r.result.ok ? `: ${after}` : ''}`, !r.result.ok,
         { label: 'Commands and output', fn: () => commandsDialog(r.result.title, r.steps, r.result.id) });
       if (!r.result.ok || ['db_scripts', 'db_start', 'db_new'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
-    } catch (e) { status(e.message, true); }
+    } catch (e) {
+      if (quiet) { delete S.busy[server + action]; return false; }
+      status(e.message, true);
+    }
     delete S.busy[server + action];
     try { S.log = (await api('/api/actions')).actions; } catch (e) { /* keep the old log */ }
     paint();
+  }
+
+  /* the same action on every server it applies to (in parallel, each logged as its own action) */
+  const ALL = {
+    connect: ['Connect all', (s) => !s.disabled && !s.connected],
+    disconnect: ['Disconnect all', (s) => s.connected],
+    status: ['Read all states', (s) => !s.disabled && s.connected],
+    db_status: ['Read all databases', (s) => !s.disabled && s.connected],
+  };
+
+  function allButton(action, opts = {}) {
+    const [label, applies] = ALL[action];
+    const targets = listed().filter(applies);
+    const busy = S.busy['*' + action];
+    return h('button', { type: 'button', class: 'sv-btn' + (opts.danger ? ' danger' : ''), disabled: busy || !targets.length ? '' : null,
+      title: targets.length ? `${targets.map((t) => t.name).join(', ')} (each logged as its own action)` : 'no server to do it on',
+      onclick: async (ev) => {
+        const b = ev.currentTarget;
+        if (opts.confirm && !b.dataset.armed) {
+          b.dataset.armed = '1'; b.textContent = `Click again: ${targets.length} server${targets.length > 1 ? 's' : ''}`; b.classList.add('armed');
+          setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = label; b.classList.remove('armed'); } }, 4000);
+          return;
+        }
+        S.busy['*' + action] = true;
+        const ok = await Promise.all(targets.map((t) => run(t.name, action, {}, null, true)));
+        delete S.busy['*' + action];
+        const failed = targets.filter((_, i) => !ok[i]).map((t) => t.name);
+        status(`${label}: ${targets.length - failed.length} of ${targets.length} done` + (failed.length ? `; failed: ${failed.join(', ')} (see the action log)` : ''), !!failed.length);
+        await load();
+      } }, busy ? `${label}...` : `${label}${targets.length ? ` (${targets.length})` : ''}`);
   }
 
   /* an action button and its ">_" (show the commands) */
@@ -170,6 +204,7 @@
       h('div', { class: 'rs-head' }, h('h2', {}, 'Servers'),
         h('span', { class: 'hint' }, S.data.central ? `central server: ${S.data.central} (synchronised data)` : 'no central server yet: choose one in Edit servers'),
         h('span', { class: 'sp' }),
+        h('span', { class: 'sv-all' }, allButton('connect'), allButton('status'), allButton('db_status'), allButton('disconnect', { danger: true, confirm: true })),
         h('button', { type: 'button', class: 'ghost', onclick: editServers }, 'Edit servers'),
         h('button', { type: 'button', class: 'ghost', onclick: load }, 'Refresh')),
       h('p', { class: 'hint sv-note' }, NOTE),
@@ -323,9 +358,11 @@
     const servers = listed().filter((s) => !s.disabled);
     box.replaceChildren(
       h('div', { class: 'rs-head' }, h('h2', {}, 'Databases'), h('span', { class: 'hint' }, 'the Postgres of each server, and the synchronised one on the central server'),
-        h('span', { class: 'sp' }), h('button', { type: 'button', class: 'ghost', onclick: load }, 'Refresh')),
-      h('p', { class: 'hint sv-note' }, 'Start uses your launch-server.sh for a server\'s own database, with the folder you pick (it also starts its MLflow UI on port 5923); '
-        + 'the synchronised database runs Postgres alone on its own socket and port. Stop is docker container stop, as in your stop.sh. New dated database copies _empty_db. '
+        h('span', { class: 'sp' }),
+        h('span', { class: 'sv-all' }, allButton('connect'), allButton('db_status'), allButton('disconnect', { danger: true, confirm: true })),
+        h('button', { type: 'button', class: 'ghost', onclick: load }, 'Refresh')),
+      h('p', { class: 'hint sv-note' }, 'Start copies the launcher\'s db/launch.sh and db/serve.sh to the server and runs them with the folder and image you pick: '
+        + 'Postgres, then its MLflow UI (ports in the server paths). Stop is docker container stop. New dated database copies _empty_db. '
         + 'Nothing is read or started until you click; ">_" shows the commands first.'),
       ...servers.map(dbCard),
       h('details', { class: 'card sv-card' }, h('summary', {}, h('b', {}, 'Database actions'), h('span', { class: 'hint' }, '  with their commands and output')),
