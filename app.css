@@ -886,6 +886,19 @@ body.tab-databases main > section:not(#databasestab), body.tab-databases main > 
 .db-warn { margin: 0; padding: 6px 10px; border-left: 3px solid var(--warn-ink, #93600a); background: var(--add-bg, #fbf3df); border-radius: 4px; font-size: 12.5px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .db-nosync { border-style: dashed; }
 
-.db-image { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; }
-.db-image select { max-width: 420px; font-family: var(--mono, monospace); font-size: 12px; }
-.db-image-txt { width: 260px; font-family: var(--mono, monospace); font-size: 12px; }
+.db-image { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 10px; border-radius: 6px; background: var(--bg); font-size: 12.5px; }
+.db-image-lbl { color: var(--mute); line-height: 24px; }
+.db-image-body { display: grid; gap: 6px; min-width: 0; }
+.db-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.db-repo { margin-right: 4px; color: var(--mute); font-size: 12px; }
+.db-tag { display: inline-flex; align-items: baseline; gap: 5px; padding: 1px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); font-family: var(--mono, ui-monospace, monospace); font-size: 12px; line-height: 20px; cursor: pointer; }
+.db-tag:hover { border-color: var(--mute); }
+.db-tag.on { border-color: var(--accent); background: var(--sel); color: var(--accent); font-weight: 600; }
+.db-tag.missing { border-style: dashed; color: var(--mute); }
+.db-tag.missing.on { color: var(--err); border-color: var(--err); background: color-mix(in srgb, var(--err) 8%, var(--panel)); }
+.db-tag small { font: 500 10px system-ui, sans-serif; color: var(--mute); text-transform: uppercase; letter-spacing: .04em; }
+.db-image-txt { flex: 1 1 220px; max-width: 340px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-family: var(--mono, ui-monospace, monospace); font-size: 12px; line-height: 20px; }
+.db-image-txt:focus { outline: none; border-color: var(--accent); }
+.db-image-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 22px; }
+.db-reset { padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; }
+.db-reset:hover { text-decoration: underline; }

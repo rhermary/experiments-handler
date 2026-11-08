@@ -5,7 +5,7 @@
    ran, its commands and their output are shown (and kept in the action log).
    Depends on editors.js ($, h, api, status) and app.js (cfg, commit, clone). */
 (() => {
-  const S = { data: null, tab: null, busy: {}, log: [], pick: {}, modif: {}, image: {} };
+  const S = { data: null, tab: null, busy: {}, log: [], pick: {}, modif: {}, image: {}, other: {} };
   const LABELS = {
     base: ['Base folder', 'the other paths default to it'], db_pattern: ['Own databases', 'Postgres data folders (<server>_<date>_db)'],
     psql_sock: ['Own Postgres socket', ''], pg_port: ['Own Postgres port', ''], artifacts: ['Artifacts', 'of the runs made here'],
@@ -243,23 +243,45 @@
         actionButton(sv, 'db_sizes', 'Measure sizes', { disabled: !sv.connected || !folders.length, args: { which }, title: 'du on the folders (can take a while)' })));
   }
 
-  /* the image a database starts in: one found on the server, or any other name (then: Pull image) */
+  /* the image a database starts in: a tag of the images on the server (one row per repository), the default one even
+     when it is missing (then: Pull), or any other name typed in */
   function imagePicker(sv, key) {
-    const found = (sv.db?.images || []).map((i) => i.image);
+    const imgs = sv.db?.images || [];
+    const found = imgs.map((i) => i.image);
     const def = sv.image_default || '';
     const cur = S.image[key] ?? (found.includes(def) || !found.length ? def : found[0]);
     S.image[key] = cur;
-    const there = found.includes(cur);
-    const sel = h('select', { 'aria-label': 'Image to start the database in' },
-      ...found.map((i) => { const m = sv.db.images.find((x) => x.image === i); return h('option', { value: i, selected: i === cur ? '' : null }, `${i}  (${m.created}, ${m.size})`); }),
-      h('option', { value: '', selected: there ? null : '' }, found.length ? 'other...' : '(none found on the server)'));
-    const txt = h('input', { type: 'text', value: cur, placeholder: 'repository:tag', class: 'db-image-txt', spellcheck: 'false', 'data-key': key });
-    sel.addEventListener('change', () => { S.image[key] = sel.value; paint(); if (!sel.value) $('.db-image-txt[data-key="' + key + '"]')?.focus(); });
+    const split = (i) => { const k = i.lastIndexOf(':'); return k > i.lastIndexOf('/') ? [i.slice(0, k), i.slice(k + 1)] : [i, 'latest']; };
+    const choose = (i) => { S.image[key] = i; S.other = { ...S.other, [key]: false }; paint(); };
+    const repos = new Map();
+    for (const i of [...found, ...(def && !found.includes(def) ? [def] : [])]) {
+      const [r, t] = split(i);
+      if (!repos.has(r)) repos.set(r, []);
+      repos.get(r).push({ image: i, tag: t, meta: imgs.find((x) => x.image === i) });
+    }
+    const other = S.other?.[key] || (cur && !repos.size) || (cur && ![...repos.values()].flat().some((x) => x.image === cur));
+    const tagBtn = (x) => h('button', {
+      type: 'button', class: 'db-tag' + (x.image === cur && !other ? ' on' : '') + (x.meta ? '' : ' missing'),
+      'aria-pressed': x.image === cur && !other ? 'true' : 'false',
+      title: x.meta ? `${x.image}\ncreated ${x.meta.created} · ${x.meta.size}` : `${x.image}: not on ${sv.name}`,
+      onclick: () => choose(x.image) }, x.tag, x.image === def ? h('small', {}, 'default') : '');
+    const otherBtn = h('button', { type: 'button', class: 'db-tag' + (other ? ' on' : ''), onclick: () => { S.other = { ...S.other, [key]: true }; paint(); $(`.db-image-txt[data-key="${key}"]`)?.focus(); } }, 'other…');
+    const rows = [...repos].map(([r, tags], n, all) => h('div', { class: 'db-tags' }, h('code', { class: 'db-repo' }, r), ...tags.map(tagBtn),
+      n === all.length - 1 ? otherBtn : ''));
+    const txt = h('input', { type: 'text', value: other ? cur : '', placeholder: 'repository:tag', class: 'db-image-txt', spellcheck: 'false', 'data-key': key, 'aria-label': 'Image name' });
     txt.addEventListener('change', () => { S.image[key] = txt.value.trim(); paint(); });
-    return h('div', { class: 'db-image' }, h('span', { class: 'hint' }, 'Image'), sel, there ? '' : txt,
-      there ? pill('ok', 'on the server') : cur ? pill('bad', 'not on the server', 'starting refuses to download it: pull it first') : '',
-      cur === def ? h('span', { class: 'hint' }, 'default') : h('button', { type: 'button', class: 'sv-btn', onclick: () => { S.image[key] = def; paint(); } }, `default: ${def || 'none'}`),
-      !there && cur ? actionButton(sv, 'db_pull', `Pull ${cur}`, { disabled: !sv.connected, args: { image: cur }, after: 'read the databases again to see it', title: `docker pull ${cur} on ${sv.name} (can take minutes)` }) : '');
+    const there = found.includes(cur);
+    const meta = imgs.find((x) => x.image === cur);
+    return h('div', { class: 'db-image' },
+      h('span', { class: 'db-image-lbl' }, 'Image'),
+      h('div', { class: 'db-image-body' },
+        ...(rows.length ? rows : [h('div', { class: 'db-tags' }, h('span', { class: 'hint' }, 'no image found on the server'), otherBtn)]),
+        other ? h('div', { class: 'db-tags' }, txt) : '',
+        cur ? h('div', { class: 'db-image-state' },
+          there ? pill('ok', 'on the server') : pill('bad', 'not on the server', 'starting never downloads it: pull it first'),
+          h('span', { class: 'hint' }, meta ? `created ${meta.created} · ${meta.size}` : ''),
+          !there ? actionButton(sv, 'db_pull', 'Pull', { disabled: !sv.connected, args: { image: cur }, after: 'read the databases again to see it', title: `docker pull ${cur} on ${sv.name} (can take minutes)` }) : '',
+          cur !== def && def ? h('button', { type: 'button', class: 'db-reset', onclick: () => choose(def) }, 'back to the default') : '') : ''));
   }
 
   /* a synchronised database: on the central server always, elsewhere when one was found */
