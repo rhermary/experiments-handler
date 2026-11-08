@@ -20,6 +20,9 @@
     ['sync_artifacts', 'Synchronised artifacts'], ['sync_checkpoints', 'Synchronised checkpoints']];
   const CENTRAL_KEYS = new Set(['synchronised', 'sync_sock', 'sync_port', 'sync_ui_port', 'sync_db_pattern', 'sync_artifacts', 'sync_checkpoints']);
 
+  /* Postgres state: running, stale (socket file left, nothing answers), stopped */
+  const STALE = 'socket file left but nothing answers on it: Postgres was killed (e.g. its container stopped without a clean shutdown). Starting removes it.';
+  const pgPill = (state) => state === 'running' ? pill('ok', 'running') : state === 'stale' ? pill('warn', 'stopped (stale socket)', STALE) : pill('bad', 'stopped');
   const pill = (cls, text, title) => h('span', { class: 'sv-pill ' + cls, title: title || null }, text);
   const base = (p) => String(p || '').split('/').pop();
   const listed = () => S.data?.servers || [];
@@ -146,7 +149,7 @@
 
   function pgSummary(state, latest, n) {
     if (!state) return h('span', { class: 'hint' }, '?');
-    return h('div', { class: 'sv-stack' }, state === 'running' ? pill('ok', 'running') : pill('bad', 'stopped', 'start it in Databases'),
+    return h('div', { class: 'sv-stack' }, pgPill(state),
       latest ? h('code', { class: 'sv-path' }, base(latest)) : h('span', { class: 'hint' }, 'no folder'), n > 1 ? h('span', { class: 'hint' }, `newest of ${n}`) : '');
   }
 
@@ -254,7 +257,7 @@
     modif.addEventListener('change', () => { S.modif[key] = modif.checked; paint(); });
     const running = db.state === 'running';
     return h('div', { class: 'db-sec' },
-      h('div', { class: 'db-head' }, h('b', {}, title), running ? pill('ok', 'running') : pill('bad', 'stopped'), h('code', { class: 'sv-path' }, where)),
+      h('div', { class: 'db-head' }, h('b', {}, title), pgPill(db.state), h('code', { class: 'sv-path' }, where)),
       notCentral,
       h('dl', { class: 'db-facts' },
         h('dt', {}, 'Folder in use'), h('dd', {}, inUse ? h('code', { class: 'sv-path', title: db.data_directory ? 'asked to Postgres (show data_directory)' : 'from the container' }, inUse) : h('span', { class: 'hint' }, running ? 'unknown' : 'none (stopped)')),

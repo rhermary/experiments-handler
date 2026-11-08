@@ -31,6 +31,16 @@ done
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 mkdir -p "$socket"
 
+# a socket left by a Postgres that was killed: nothing answers on it, remove it (and its lock file)
+sock_file="$socket/.s.PGSQL.$port"
+if [[ -S "$sock_file" ]]; then
+    if python3 -c 'import socket,sys; c=socket.socket(socket.AF_UNIX); c.settimeout(3); c.connect(sys.argv[1])' "$sock_file" 2>/dev/null; then
+        echo "a Postgres already answers on $sock_file: not starting another one" >&2; exit 1
+    fi
+    echo "removing the stale socket $sock_file and its lock file (nothing answers on it)"
+    rm -f "$sock_file" "$sock_file.lock"
+fi
+
 docker run --detach --rm --pull never \
     --name "$name" --label "launcher.db=$label" \
     --user "$(id -u)" \

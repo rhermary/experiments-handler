@@ -66,13 +66,21 @@ def disconnect_steps(sv):
                          ["ssh", "-o", f"ControlPath={CTL_DIR}/%C", "-O", "exit", *_target(sv)], timeout=15)]
 
 
+def pg_state(sock, port):
+    """Shell: running (Postgres answers on its socket), stale (the socket file is left but nothing answers: Postgres
+    was killed, e.g. its container stopped without a clean shutdown) or stopped (no socket)."""
+    s = shlex.quote(f"{sock}/.s.PGSQL.{port}")
+    return (f"if python3 -c 'import socket,sys; c=socket.socket(socket.AF_UNIX); c.settimeout(3); c.connect(sys.argv[1])' {s} 2>/dev/null; "
+            f"then echo running; elif test -S {s}; then echo stale; else echo stopped; fi")
+
+
 def _status_script(sv, central):
     """A read-only shell script: what is running and where, on one server."""
     p = core.server_paths(sv)
     q = shlex.quote
     lines = [
         "echo @@HOST; hostname",
-        f"echo @@PG; test -S {q(p['psql_sock'])}/.s.PGSQL.{p['pg_port']} && echo running || echo stopped",
+        f"echo @@PG; {pg_state(p['psql_sock'], p['pg_port'])}",
         f"echo @@DB; ls -d {p['db_pattern']} 2>/dev/null | sort",
         "echo @@GPU; nvidia-smi --query-gpu=index,uuid,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null",
         "echo @@APPS; nvidia-smi --query-compute-apps=gpu_uuid --format=csv,noheader 2>/dev/null",
@@ -80,7 +88,7 @@ def _status_script(sv, central):
         "echo @@DIRS; for d in " + " ".join(q(p[k]) for k in ("artifacts", "checkpoints", "launcher")) + "; do test -d \"$d\" && echo \"$d\"; done",
     ]
     if central:
-        lines += [f"echo @@SYNCPG; test -S {q(p['sync_sock'])}/.s.PGSQL.{p['sync_port']} && echo running || echo stopped",
+        lines += [f"echo @@SYNCPG; {pg_state(p['sync_sock'], p['sync_port'])}",
                   f"echo @@SYNCDB; ls -d {p['sync_db_pattern']} 2>/dev/null | sort",
                   "echo @@SYNCDIRS; for d in " + " ".join(q(p[k]) for k in ("sync_artifacts", "sync_checkpoints")) + "; do test -d \"$d\" && echo \"$d\"; done"]
     return "\n".join(lines + ["exit 0"])
@@ -125,7 +133,7 @@ def db_status_steps(sv, image=""):
                  " | awk -F'|' -v u=\"$(id -u)\" '$2==u && ($4 ~ /server(-ssl)?\\.sh|serve\\.sh/ || $3 ~ /launcher-(synchronised-)?db/) {print $1}')")
     for which in ("own", "sync"):
         sock, port, pattern, _ = _db(sv, which)
-        lines += [f"echo @@{which.upper()}_SOCK; test -S {q(sock)}/.s.PGSQL.{port} && echo running || echo stopped",
+        lines += [f"echo @@{which.upper()}_SOCK; {pg_state(sock, port)}",
                   f"echo @@{which.upper()}_FOLDERS; ls -d {pattern} 2>/dev/null | sort",
                   f"echo @@{which.upper()}_DATADIR",
                   f"for c in $DBC; do docker exec \"$c\" psql -h {q(sock)} -p {port} -U \"$(id -un)\" -d mlruns_db -Atc 'show data_directory' 2>/dev/null | grep '^/' && break; done"]

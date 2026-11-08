@@ -904,3 +904,4 @@ body.tab-databases main > section:not(#databasestab), body.tab-databases main > 
 .db-reset:hover { text-decoration: underline; }
 .sv-all { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .db-facts dd .sv-path, .db-head .sv-path { white-space: normal; overflow-wrap: anywhere; }
+.sv-pill.warn { color: var(--warn-ink, #93600a); background: color-mix(in srgb, #e0a100 16%, var(--panel)); }
