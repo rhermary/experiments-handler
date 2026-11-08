@@ -22,6 +22,7 @@ import core
 import actions
 import diffview
 import remote
+import sync
 import xpqueue
 import gpus
 import mlflow_ui
@@ -484,7 +485,8 @@ _STATUS = {}                                                 # server name -> it
 
 def _server_view(sv, cfg=None):
     return {**sv, "paths_all": core.server_paths(sv), "connected": remote.connected(sv), "status": _STATUS.get(sv["name"]),
-            "db": _DB.get(sv["name"]), "image_default": _image(cfg or core.load(), sv)}
+            "db": _DB.get(sv["name"]), "image_default": _image(cfg or core.load(), sv),
+            "sync": sync.light(sync.PLANS.get(sv["name"])), "synced": _SYNCED.get(sv["name"])}
 
 
 @app.get("/api/servers")
@@ -518,7 +520,10 @@ SERVER_ACTIONS = {
     "db_new": ("create a database folder", lambda cfg, sv, a: remote.db_new_steps(sv, a.get("which", "own"), __import__("datetime").date.today().strftime("%Y.%m.%d"))),
     "db_sizes": ("measure the database folders", lambda cfg, sv, a: remote.db_sizes_steps(sv, a.get("which", "own"))),
     "db_scripts": ("show the database scripts", lambda cfg, sv, a: remote.db_scripts_steps(sv)),
+    "sync_preview": ("preview the sync to the central server", lambda cfg, sv, a: sync.preview_steps(sv, core.central_server(cfg))),
+    "sync_run": ("sync to the central server", lambda cfg, sv, a: sync.sync_steps(sv, core.central_server(cfg), a.get("experiments") or [])),
 }
+_SYNCED = {}                                                 # server name -> the last sync: {when, id, ok, out}
 
 
 @app.post("/api/servers/run")
@@ -541,6 +546,9 @@ def api_servers_run():
         return jsonify(plan=actions.plan(steps), title=f"{sv['name']}: {what}")
     if body["action"] != "connect" and not remote.connected(sv):
         return jsonify(error=f"{sv['name']} is not connected: click Connect first"), 400
+    central = core.central_server(cfg)
+    if body["action"].startswith("sync_") and not remote.connected(central):
+        return jsonify(error=f"{central['name']} (the central server) is not connected: click Connect first"), 400
     res = actions.run(body["action"], sv["name"], f"{sv['name']}: {what}", steps)
     if body["action"] == "status" and res["ok"]:
         _STATUS[sv["name"]] = {**remote.parse_status(res["steps"][0]["out"]), "when": res["when"]}
@@ -549,6 +557,11 @@ def api_servers_run():
     if body["action"] == "db_sizes" and res["ok"]:
         sizes = {ln.split("\t", 1)[1]: int(ln.split("\t", 1)[0]) for ln in res["steps"][0]["out"].splitlines() if "\t" in ln}
         _DB.setdefault(sv["name"], {}).setdefault("sizes", {}).update(sizes)
+    if body["action"] == "sync_run":
+        rows = next((s["out"] for s in res["steps"] if s["label"].startswith("copy the rows")), "")
+        _SYNCED[sv["name"]] = {"when": res["when"], "id": res["id"], "ok": res["ok"], "out": rows}
+        if res["ok"]:
+            sync.PLANS.pop(sv["name"], None)                 # what it said is done: preview again to see what is left
     if body["action"] == "disconnect":
         _STATUS.pop(sv["name"], None)
         _DB.pop(sv["name"], None)

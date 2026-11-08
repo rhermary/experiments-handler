@@ -69,7 +69,7 @@
       syncSelection();                         // unknown XPs, blocks or options fall back to the defaults
       draw();
       setPvTab(p.get('pv') === 'script' ? 'script' : 'yaml');
-      const tab = ['results', 'mlflow', 'servers', 'databases'].includes(p.get('tab')) ? p.get('tab') : 'launcher';
+      const tab = ['results', 'mlflow', 'servers', 'databases', 'sync'].includes(p.get('tab')) ? p.get('tab') : 'launcher';
       if (p.get('view')) XPResults.setView(p.get('view'));
       if (tab === 'results' && p.get('rsel') !== XPResults.selection) XPResults.setSelection(p.get('rsel'));
       if (tab === 'mlflow') {

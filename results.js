@@ -1000,9 +1000,9 @@
   let loadedFor = null;
   function switchTab(tab) {
     R.tab = tab;
-    for (const t of ['results', 'mlflow', 'servers', 'databases']) document.body.classList.toggle('tab-' + t, tab === t);
-    for (const t of ['launcher', 'results', 'mlflow', 'servers', 'databases']) $('#tab-' + t)?.setAttribute('aria-pressed', String(tab === t));
-    if (tab === 'servers' || tab === 'databases') { window.XPServers?.show(tab); return; }
+    for (const t of ['results', 'mlflow', 'servers', 'databases', 'sync']) document.body.classList.toggle('tab-' + t, tab === t);
+    for (const t of ['launcher', 'results', 'mlflow', 'servers', 'databases', 'sync']) $('#tab-' + t)?.setAttribute('aria-pressed', String(tab === t));
+    if (tab === 'servers' || tab === 'databases' || tab === 'sync') { window.XPServers?.show(tab); return; }
     window.XPServers?.hide();
     if (tab === 'mlflow') { startMlflow(); return; }
     if (tab === 'results' && (loadedFor !== st.xp || !R.data)) {
@@ -1016,7 +1016,8 @@
     h('button', { type: 'button', id: 'tab-results', 'aria-pressed': 'false', onclick: () => switchTab('results') }, 'Results'),
     h('button', { type: 'button', id: 'tab-mlflow', 'aria-pressed': 'false', onclick: () => switchTab('mlflow') }, 'MLflow'),
     h('button', { type: 'button', id: 'tab-servers', 'aria-pressed': 'false', onclick: () => switchTab('servers') }, 'Servers'),
-    h('button', { type: 'button', id: 'tab-databases', 'aria-pressed': 'false', onclick: () => switchTab('databases') }, 'Databases'));
+    h('button', { type: 'button', id: 'tab-databases', 'aria-pressed': 'false', onclick: () => switchTab('databases') }, 'Databases'),
+    h('button', { type: 'button', id: 'tab-sync', 'aria-pressed': 'false', onclick: () => switchTab('sync') }, 'Sync'));
   $('#xpname').after(tabs);
   // for router.js (the address of the page)
   window.XPResults = {

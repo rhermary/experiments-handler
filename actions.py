@@ -18,10 +18,11 @@ import core
 _LOCK = threading.Lock()
 
 
-def step(label, argv=None, fn=None, display=None, timeout=120, allow_fail=False, stdin=None):
-    """A step of an action: `argv` (a command) or `fn` (Python, returns its output text); `display` is what is shown."""
+def step(label, argv=None, fn=None, display=None, timeout=120, allow_fail=False, stdin=None, always=False):
+    """A step of an action: `argv` (a command) or `fn` (Python, returns its output text); `display` is what is shown.
+    always: runs even after an earlier step failed (cleanup: closing a tunnel)."""
     return {"label": label, "argv": argv, "fn": fn, "display": display or (shlex.join(argv) if argv else label),
-            "timeout": timeout, "allow_fail": allow_fail, "stdin": stdin}
+            "timeout": timeout, "allow_fail": allow_fail or always, "stdin": stdin, "always": always}
 
 
 def _dir():
@@ -55,6 +56,8 @@ def run(kind, server, title, steps, meta=None):
     with open(log, "w", encoding="utf8") as f:
         f.write(f"# {title}\n# {when}  server: {server or '-'}\n\n")
     for s in steps:
+        if not out["ok"] and not s.get("always"):
+            continue
         t0, rc, so, se = time.time(), 0, "", ""
         try:
             if s["argv"]:
@@ -78,7 +81,6 @@ def run(kind, server, title, steps, meta=None):
             f.write(f"[exit {rc}, {res['secs']} s]\n\n")
         if rc != 0 and not s["allow_fail"]:
             out["ok"] = False
-            break
     (folder / "action.json").write_text(json.dumps({k: v for k, v in out.items()}, indent=1, default=str))
     with _LOCK, open(_log(), "a", encoding="utf8") as f:
         f.write(json.dumps({"id": out["id"], "when": out["when"], "kind": kind, "server": server, "title": title,

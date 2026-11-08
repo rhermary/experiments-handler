@@ -905,3 +905,14 @@ body.tab-databases main > section:not(#databasestab), body.tab-databases main > 
 .sv-all { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .db-facts dd .sv-path, .db-head .sv-path { white-space: normal; overflow-wrap: anywhere; }
 .sv-pill.warn { color: var(--warn-ink, #93600a); background: color-mix(in srgb, #e0a100 16%, var(--panel)); }
+body.tab-sync #synctab { display: grid; gap: 12px; min-width: 0; grid-template-columns: minmax(0, 1fr); }
+body.tab-sync main > section:not(#synctab), body.tab-sync main > #output, body.tab-sync .bar { display: none !important; }
+.sync-central { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.sync-table td.sync-new { color: #1f7a3a; font-weight: 600; }
+.sync-table td.sync-chg { color: var(--warn-ink, #93600a); font-weight: 600; }
+.sync-table tr.sync-done td { color: var(--mute); }
+.sync-table tfoot td { border-top: 1px solid var(--line); border-bottom: 0; padding-top: 6px; }
+.sync-out { margin: 6px 0 0; padding: 6px 10px; background: var(--code); border-radius: 6px; font-size: 12px; white-space: pre-wrap; }
+#synctab { display: none; }
+#synctab > *, #synctab .rs-scroll { min-width: 0; max-width: 100%; }
+#synctab .rs-scroll { overflow-x: auto; }

@@ -5,7 +5,7 @@
    ran, its commands and their output are shown (and kept in the action log).
    Depends on editors.js ($, h, api, status) and app.js (cfg, commit, clone). */
 (() => {
-  const S = { data: null, tab: null, busy: {}, log: [], pick: {}, modif: {}, image: {}, other: {} };
+  const S = { data: null, tab: null, busy: {}, log: [], pick: {}, modif: {}, image: {}, other: {}, syncSel: {} };
   const LABELS = {
     base: ['Base folder', 'the other paths default to it'], db_pattern: ['Own databases', 'Postgres data folders (<server>_<date>_db)'],
     psql_sock: ['Own Postgres socket', ''], pg_port: ['Own Postgres port', ''], artifacts: ['Artifacts', 'of the runs made here'],
@@ -51,7 +51,7 @@
       if (quiet) { delete S.busy[server + action]; return r.result.ok; }
       status(`${r.result.title} ${r.result.ok ? 'done' : 'failed'}${after && r.result.ok ? `: ${after}` : ''}`, !r.result.ok,
         { label: 'Commands and output', fn: () => commandsDialog(r.result.title, r.steps, r.result.id) });
-      if (!r.result.ok || ['db_scripts', 'db_start', 'db_new'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
+      if (!r.result.ok || ['db_scripts', 'db_start', 'db_new', 'sync_run'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
     } catch (e) {
       if (quiet) { delete S.busy[server + action]; return false; }
       status(e.message, true);
@@ -207,7 +207,7 @@
   }
 
   function logTable(kind) {
-    const rows = S.log.filter((a) => !kind || (kind === 'db' ? a.kind.startsWith('db_') : true));
+    const rows = S.log.filter((a) => !kind || a.kind.startsWith(kind + '_'));
     if (!rows.length) return h('p', { class: 'hint' }, 'No action yet.');
     return h('table', { class: 'sv-log-table' },
       h('thead', {}, h('tr', {}, ...['When', 'Action', 'Server', 'Steps', 'Result', ''].map((t) => h('th', {}, t)))),
@@ -395,7 +395,83 @@
     const box = S.tab && $(`#${S.tab}tab`);
     if (!box) return;
     if (!S.data) { box.replaceChildren(h('p', { class: 'empty' }, 'Reading the servers...')); return; }
-    if (S.tab === 'servers') paintServers(box); else paintDatabases(box);
+    if (S.tab === 'servers') paintServers(box); else if (S.tab === 'sync') paintSync(box); else paintDatabases(box);
+  }
+
+  /* ---------- Sync tab ---------- */
+
+  const gb = (b) => (b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : b >= 1e3 ? `${Math.round(b / 1e3)} kB` : `${b} B`);
+
+  function syncCard(sv, central) {
+    const pv = sv.sync;
+    const own = sv.db?.own;
+    const cdb = central?.db?.sync;
+    const notReady = !sv.connected ? 'connect it first' : !central?.connected ? `connect ${central?.name} first`
+      : own && own.state !== 'running' ? 'its database is not running (Databases)' : cdb && cdb.state !== 'running' ? `the synchronised database on ${central.name} is not running (Databases)` : '';
+    const head = h('div', { class: 'db-top' }, h('b', { class: 'db-name' }, sv.name), sv.connected ? pill('ok', 'connected') : pill('off', 'not connected'),
+      h('span', { class: 'hint' }, 'own database'), own ? pgPill(own.state) : h('span', { class: 'hint' }, '? (read the databases)'),
+      h('span', { class: 'sp' }),
+      actionButton(sv, 'sync_preview', pv ? 'Preview again' : 'Preview', { disabled: !!notReady, title: notReady || 'Read-only: what a sync would copy (runs, files, sizes)' }));
+    const parts = [head];
+    if (sv.synced) {
+      parts.push(h('p', { class: sv.synced.ok ? 'hint' : 'db-warn' }, `Last sync ${sv.synced.when}: ${sv.synced.ok ? 'done and checked' : 'failed (nothing of the failed step was kept)'}. `,
+        h('button', { type: 'button', class: 'db-reset', onclick: () => openLog(sv.synced.id) }, 'commands and output'),
+        sv.synced.out ? h('pre', { class: 'sync-out' }, sv.synced.out.trim()) : ''));
+    }
+    if (!pv) {
+      parts.push(h('p', { class: 'hint' }, notReady ? `To preview: ${notReady}.` : 'Preview to see what a sync would copy. Nothing is copied before you click Sync.'));
+      return h('div', { class: 'card sv-card db-card' }, ...parts);
+    }
+    const sel = S.syncSel[sv.name] ??= new Set(pv.experiments.filter((x) => x.new + x.changed).map((x) => x.name));
+    const todo = pv.experiments.filter((x) => sel.has(x.name) && x.new + x.changed);
+    const tot = (k, list = pv.experiments) => list.reduce((a, x) => a + x[k], 0);
+    const row = (x) => {
+      const can = x.new + x.changed > 0;
+      const cb = h('input', { type: 'checkbox', checked: can && sel.has(x.name) ? '' : null, disabled: can ? null : '', 'aria-label': `Sync ${x.name}` });
+      cb.addEventListener('change', () => { if (cb.checked) sel.add(x.name); else sel.delete(x.name); paint(); });
+      const n = (v, cls) => h('td', { class: 'num' + (v ? (cls ? ' ' + cls : '') : ' hint') }, String(v || 0));
+      return h('tr', { class: can ? '' : 'sync-done' }, h('td', {}, cb), h('td', {}, x.name, x.deleted ? h('span', { class: 'hint' }, ' (deleted)') : ''),
+        n(x.new, 'sync-new'), n(x.changed, 'sync-chg'), n(x.synced), h('td', { class: 'num' + (x.old_path ? '' : ' hint'), title: x.old_example ? `left alone, e.g. ${x.old_example}` : null }, String(x.old_path || 0)),
+        h('td', { class: 'num' }, can ? `${x.files} · ${gb(x.bytes)}` : ''),
+        h('td', { class: 'hint' }, x.dst_id ? `id ${x.src_id} → ${x.dst_id}` : `id ${x.src_id} → created`));
+    };
+    parts.push(
+      h('p', { class: 'hint' }, `Preview of ${pv.when}: into ${pv.dst_folder} on ${pv.central} (files under ${pv.dst_artifacts.replace(/\/artifacts$/, '')}/{artifacts,checkpoints}). MLflow schema ${pv.schema}.`),
+      ...(pv.blocking || []).map((b) => h('p', { class: 'db-warn' }, b)),
+      h('div', { class: 'rs-scroll' }, h('table', { class: 'db-folders sync-table' },
+        h('thead', {}, h('tr', {}, ...['', 'Experiment', 'New', 'Changed', 'Already synced', 'Older paths', 'Files to copy', 'Experiment id'].map((t) => h('th', {}, t)))),
+        h('tbody', {}, ...pv.experiments.map(row)),
+        h('tfoot', {}, h('tr', {}, h('td', {}), h('td', {}, h('b', {}, 'Selected')), h('td', { class: 'num' }, String(tot('new', todo))), h('td', { class: 'num' }, String(tot('changed', todo))),
+          h('td', {}), h('td', {}), h('td', { class: 'num' }, `${tot('files', todo)} · ${gb(tot('bytes', todo))}`), h('td', {}))))),
+      Object.keys(pv.not_copied || {}).length ? h('p', { class: 'hint' }, 'Not copied (not used by this project): ' + Object.entries(pv.not_copied).map(([k, v]) => `${v} ${k}`).join(', ')) : '',
+      h('p', { class: 'hint' }, '"Changed": already synced, but its status, end time, params, tags, last metrics or datasets changed since: it is copied again. '
+        + '"Older paths": runs whose artifacts are not under ' + pv.src_artifacts + ': left alone.'),
+      h('div', { class: 'db-acts' },
+        actionButton(sv, 'sync_run', todo.length ? `Sync ${tot('new', todo) + tot('changed', todo)} run${tot('new', todo) + tot('changed', todo) > 1 ? 's' : ''} (${gb(tot('bytes', todo))})` : 'Sync', {
+          primary: true, confirm: 'Click again to sync', disabled: !!notReady || !todo.length || (pv.blocking || []).length > 0,
+          args: { experiments: todo.map((x) => x.name) }, title: notReady || 'Copies the files, then the rows (one transaction), then checks both' })));
+    return h('div', { class: 'card sv-card db-card' }, ...parts);
+  }
+
+  function paintSync(box) {
+    const servers = listed().filter((s) => !s.disabled);
+    const central = servers.find((s) => s.central);
+    const cdb = central?.db?.sync;
+    box.replaceChildren(
+      h('div', { class: 'rs-head' }, h('h2', {}, 'Sync'),
+        h('span', { class: 'hint' }, central ? `runs, artifacts and checkpoints of each server → the synchronised database on ${central.name}` : 'no central server: choose one in Servers > Edit servers'),
+        h('span', { class: 'sp' }),
+        h('span', { class: 'sv-all' }, allButton('connect'), allButton('db_status')), refreshButton()),
+      central ? h('div', { class: 'card sv-card sync-central' },
+        h('b', {}, `Into ${central.name}`), cdb ? pgPill(cdb.state) : h('span', { class: 'hint' }, '? (read the databases)'),
+        h('code', { class: 'sv-path' }, cdb?.data_directory || cdb?.container?.folder || central.paths_all.sync_db_pattern),
+        h('span', { class: 'hint' }, `files: ${central.paths_all.sync_artifacts}, ${central.paths_all.sync_checkpoints}`)) : '',
+      h('p', { class: 'hint sv-note' }, 'Everything goes through this machine over your ssh connections: the two Postgres sockets are tunnelled here (ssh -O forward), '
+        + 'the rows are copied in one transaction, the run folders go through tar | tar. Files first, then rows, then both are checked; '
+        + 'a sync that fails keeps no rows (run it again). Nothing is deleted anywhere. ">_" shows every command.'),
+      ...servers.map((sv) => syncCard(sv, central)),
+      h('details', { class: 'card sv-card' }, h('summary', {}, h('b', {}, 'Sync actions'), h('span', { class: 'hint' }, '  with their commands and output')),
+        h('div', { class: 'rs-scroll' }, logTable('sync'))));
   }
 
   /* ---------- editing the list of servers ---------- */
@@ -463,7 +539,8 @@
 
   /* ---------- the tabs ---------- */
 
-  $('main').append(h('section', { id: 'serverstab', 'aria-label': 'Servers' }), h('section', { id: 'databasestab', 'aria-label': 'Databases' }));
+  $('main').append(h('section', { id: 'serverstab', 'aria-label': 'Servers' }), h('section', { id: 'databasestab', 'aria-label': 'Databases' }),
+    h('section', { id: 'synctab', 'aria-label': 'Sync' }));
   window.XPServers = {
     show(tab = 'servers') { S.tab = tab; if (!S.data) load(); else paint(); },
     hide() { S.tab = null; },

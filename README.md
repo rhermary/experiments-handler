@@ -23,6 +23,11 @@ A small web app to build, launch and analyse the experiments of a Python researc
   when you click Connect, their state (Postgres, GPUs, disk), and the Postgres database of each server (start on a
   dated folder, stop, new dated database). Every action shows its commands before running them, and is logged with
   its output. Nothing connects or starts by itself.
+- **Sync**: the runs of each server's database, with their artifacts and checkpoints, copied into the synchronised
+  database of the central server, when you click. A preview (read-only) shows per experiment the new runs, the runs
+  changed since their last sync, and the size of the files; the sync copies the files (tar | tar through this machine),
+  then the rows (one transaction), and checks both. Experiments are matched by name (their ids differ between
+  databases); runs on older artifact paths are left alone; nothing is deleted.
 - **MLflow** UI in a tab, and the **GPU** usage of your servers (ssh).
 
 ## Screenshots
@@ -106,6 +111,7 @@ Optional: `latex` and `dvisvgm` to show the LaTeX tables compiled; a LaTeX insta
 | `results.py`, `report_template.py` | Results tab; `report_template.py` is also the code of the generated report scripts |
 | `diffview.py`, `gpus.py`, `mlflow_ui.py` | Diff of two selections, GPU view, MLflow UI proxy |
 | `remote.py`, `actions.py` | servers and their databases over ssh; every action as a list of commands, shown first and logged |
+| `sync.py` | sync of a server's runs, artifacts and checkpoints into the central server's synchronised database |
 | `db/launch.sh`, `db/serve.sh` | a Postgres database and its MLflow UI in a container: copied to `<launcher>/db` on the server and run by Databases > Start (image chosen at each start) |
 | `xpqueue.py` | queue of experiments (frozen scripts, started when their GPUs are free) |
 | `*.js`, `app.css`, `index.html` | the page (no build step) |
