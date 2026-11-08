@@ -91,6 +91,25 @@
       } }, busy ? `${label}...` : `${label}${targets.length ? ` (${targets.length})` : ''}`);
   }
 
+  /* Refresh: ask ssh which connections are open, then read the state and the databases of every connected server */
+  function refreshButton() {
+    const targets = listed().filter((s) => !s.disabled && s.connected);
+    return h('button', { type: 'button', class: 'ghost', disabled: S.busy['*refresh'] ? '' : null,
+      title: `Check the connections, then read the state and the databases of the connected servers${targets.length ? ` (${targets.map((t) => t.name).join(', ')})` : ''}; each read is logged`,
+      onclick: async () => {
+        S.busy['*refresh'] = true; paint();
+        await load();
+        const now = listed().filter((x) => !x.disabled && x.connected);
+        const jobs = now.flatMap((t) => ['status', 'db_status'].map((a) => [t.name, a]));
+        const ok = await Promise.all(jobs.map(([n, a]) => run(n, a, {}, null, true)));
+        delete S.busy['*refresh'];
+        const failed = [...new Set(jobs.filter((_, i) => !ok[i]).map(([n]) => n))];
+        await load();
+        status(now.length ? `Refreshed ${now.length} connected server${now.length > 1 ? 's' : ''} (${now.map((t) => t.name).join(', ')})`
+          + (failed.length ? `; failed: ${failed.join(', ')} (see the action log)` : '') : 'Refreshed: no server is connected', !!failed.length);
+      } }, S.busy['*refresh'] ? 'Refreshing...' : 'Refresh');
+  }
+
   /* an action button and its ">_" (show the commands) */
   function actionButton(sv, action, label, opts = {}) {
     const busy = S.busy[sv.name + action];
@@ -209,7 +228,7 @@
         h('span', { class: 'sp' }),
         h('span', { class: 'sv-all' }, allButton('connect'), allButton('status'), allButton('db_status'), allButton('disconnect', { danger: true, confirm: true })),
         h('button', { type: 'button', class: 'ghost', onclick: editServers }, 'Edit servers'),
-        h('button', { type: 'button', class: 'ghost', onclick: load }, 'Refresh')),
+        refreshButton()),
       h('p', { class: 'hint sv-note' }, NOTE),
       S.data.error ? h('pre', { class: 'dlg-err' }, S.data.error) : '',
       h('div', { class: 'card sv-card' }, h('div', { class: 'rs-scroll' }, h('table', { class: 'sv-table' },
@@ -363,7 +382,7 @@
       h('div', { class: 'rs-head' }, h('h2', {}, 'Databases'), h('span', { class: 'hint' }, 'the Postgres of each server, and the synchronised one on the central server'),
         h('span', { class: 'sp' }),
         h('span', { class: 'sv-all' }, allButton('connect'), allButton('db_status'), allButton('disconnect', { danger: true, confirm: true })),
-        h('button', { type: 'button', class: 'ghost', onclick: load }, 'Refresh')),
+        refreshButton()),
       h('p', { class: 'hint sv-note' }, 'Start copies the launcher\'s db/launch.sh and db/serve.sh to the server and runs them with the folder and image you pick: '
         + 'Postgres, then its MLflow UI (ports in the server paths). Stop is docker container stop. New dated database copies _empty_db. '
         + 'Nothing is read or started until you click; ">_" shows the commands first.'),
