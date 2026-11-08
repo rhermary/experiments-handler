@@ -25,7 +25,11 @@ function syncSelection() {
   if (!cfg.xps.some((x) => x.name === st.xp)) st.xp = cfg.xps[0]?.name ?? null;
   const blocks = {};
   for (const { id, rows } of xpDef()?.blocks || []) {
-    blocks[id] = rows.some((r) => r.name === st.blocks[id]) ? st.blocks[id] : rows[0].name;
+    const c = st.blocks[id];
+    if (Array.isArray(c)) {                                   // values selected in a list block
+      const ok = c.filter((n) => rows.some((r) => r.name === n && !r.loop_all));
+      blocks[id] = ok.length ? ok : rows[0].name;
+    } else blocks[id] = rows.some((r) => r.name === c) ? c : rows[0].name;
   }
   st.blocks = blocks;
   const loops = cfg.loop.options;
@@ -145,6 +149,7 @@ function checker(bid, name) {
 
 function editOption(bid, name) {
   const b = blk(bid);
+  if (b.kind === 'list') { editListBlock(bid); return; }      // its options come from the list
   const row = name == null ? null : b.rows.find((r) => r.name === name);
   const onChange = checker(bid, name);
   openDialog({
@@ -186,6 +191,7 @@ function editOption(bid, name) {
 
 function editBlock(bid) {
   const b = blk(bid);
+  if (b.kind === 'list') { editListBlock(bid); return; }
   openDialog({
     title: `Block "${b.label}" of "${st.xp}"`,
     fields: [
@@ -211,6 +217,50 @@ function editBlock(bid) {
   });
 }
 
+/* A list block: a variable and its values. Its options are generated: one per value, and "all (N)" that runs the
+   command loop once per value ($VAR becomes the loop variable ${var}). Variables built from it use $VAR. */
+function editListBlock(bid, init = {}) {
+  const b = bid ? blk(bid) : { label: init.label || '', path: init.path || '', var: 'RUN_ID', items: [], vars: {}, loop: true };
+  const lines = (b.items || []).map((it) => (it.label ? `${it.value}  # ${it.label}` : it.value)).join('\n');
+  const v0 = b.var || 'RUN_ID';
+  openDialog({
+    title: bid ? `List "${b.label}" of "${st.xp}"` : `New list block in "${st.xp}"`,
+    wide: true,
+    fields: [
+      { key: 'label', label: 'Name', value: b.label },
+      { key: 'var', label: 'Variable (each option sets it to one value)', value: b.var, mono: true, placeholder: 'RUN_ID',
+        hint: 'A script variable (e.g. RUN_ID), or a program argument (APP_...). Other variables use it as $' + v0 + '.' },
+      { key: 'items', type: 'area', rows: 8, mono: true, label: 'Values, one per line (optional label after #)', value: lines,
+        hint: 'e.g.  361d59187e3c46bea1c5a9409470f0a8  # polite-dog-639. No spaces or quotes in a value.' },
+      { key: 'vars', type: 'pairs', label: 'Variables built from it (set by every option of the list)', value: Object.entries(b.vars || {}),
+        keyPlaceholder: prefix() + 'TASK__INIT_ARGS__CHECKPOINT_PATH',
+        hint: 'Use $' + v0 + ' in the values, e.g. /data/checkpoints/1/$' + v0 + '/last.ckpt' },
+      { key: 'loop', type: 'check', label: 'Offer "all (N)": run the command loop once per value', value: b.loop !== false },
+      { key: 'path', label: 'Path (environment variable prefix, optional)', value: b.path, mono: true },
+      { type: 'note', label: 'Picking one value sets the variable like an option (the Results tab tells the runs apart by it). '
+        + '"all (N)" wraps the command loop in  for <var> in <values>; do ... done  and every $VAR becomes the loop variable, set inside the loop for each run.' },
+    ],
+    submitLabel: bid ? 'Save' : 'Add',
+    onSubmit: async (v) => {
+      if (!v.label.trim()) throw new Error('Name is required');
+      const items = v.items.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+        const [value, ...rest] = l.split('#');
+        const label = rest.join('#').trim();
+        return { value: value.trim(), ...(label ? { label } : {}) };
+      });
+      if (!items.length) throw new Error('Give at least one value');
+      const def = { label: v.label.trim(), path: v.path.trim(), kind: 'list', var: v.var.trim(), items,
+        vars: Object.fromEntries(v.vars.filter(([k]) => k.trim())), loop: !!v.loop };
+      await commit((c) => {
+        const xp = c.xps.find((x) => x.name === st.xp);
+        if (bid) Object.assign(blkIn(c, bid), def);
+        else xp.blocks.push({ id: uniqueId(xp.blocks, def.label), ...def, rows: [] });
+      });
+    },
+    remove: bid ? () => removeBlock(bid) : null,
+  });
+}
+
 const uniqueId = (blocks, base) => {
   let id = slug(base), i = 2;
   while (blocks.some((b) => b.id === id)) id = `${slug(base)}_${i++}`;
@@ -231,7 +281,10 @@ function addBlock() {
       options: [{ value: '', label: 'No: new empty block' }, ...sources],
       hint: 'The copy belongs to this XP: editing it does not change the original.' });
   }
-  fields.push({ key: 'label', label: 'Name (new block, or to rename the copy)', value: '', placeholder: 'XP variant' },
+  fields.push({ key: 'kind', type: 'select', label: 'New block', value: 'options', options: [
+    { value: 'options', label: 'options: each sets its own variables' },
+    { value: 'list', label: 'a list of values (run ids...): pick one, or loop over all of them' }] },
+  { key: 'label', label: 'Name (new block, or to rename the copy)', value: '', placeholder: 'XP variant' },
     { key: 'path', label: 'New block: path (optional)', value: '', mono: true, placeholder: `${prefix()}TASK__INIT_ARGS__`,
       hint: 'Environment variable prefix; variables of its options are relative to it.' });
   openDialog({
@@ -240,6 +293,7 @@ function addBlock() {
     submitLabel: 'Add',
     onSubmit: async (v) => {
       if (!v.source && !v.label.trim()) throw new Error('Name is required');
+      if (!v.source && v.kind === 'list') { setTimeout(() => editListBlock(null, { label: v.label.trim(), path: v.path.trim() }), 0); return; }
       await commit((c) => {
         const xp = c.xps.find((x) => x.name === st.xp);
         if (!v.source) {
@@ -303,10 +357,48 @@ function drawLoopPanel() {
   const kids = [h('div', { class: 'lp-row' }, h('span', { class: 'lp-key' }, 'Command loop'), ...pills,
     cur ? h('button', { type: 'button', class: 'tiny', onclick: () => editLoop(cur.name) }, 'Edit') : '',
     h('button', { type: 'button', class: 'tiny', onclick: () => editLoop(null) }, '+ Add'))];
-  if (cur) kids.push(h('details', { class: 'lp-text' }, h('summary', {}, 'show the loop'), h('pre', {}, cur.value.trim())));
   const info = loopInfo && loopInfo.loop === st.loop ? loopInfo : null;
+  if (cur) {
+    // the loop as it runs for this selection (lists looped over around it, @@LOOP_ENV@@ filled), or as written
+    const lists = info?.lists || [];
+    const heads = new Set(lists.map((l) => 'for ' + l.loop_var + ' in '));
+    const effective = (info?.effective || cur.value.trim()).split('\n');
+    let depth = 0, inHead = false;
+    const lines = effective.map((ln, i) => {
+      const t = ln.trim();
+      const indent = ln.length - ln.trimStart().length;
+      let cls = '';
+      if (inHead) { cls = 'lp-list lp-val'; if (t.endsWith('; do')) inHead = false; }
+      else if (t.startsWith('# list ')) cls = 'lp-list';
+      else if ([...heads].some((x) => t.startsWith(x)) && indent === depth * 4) { cls = 'lp-list'; depth += 1; inHead = !t.endsWith('; do'); }
+      else if (t === 'done' && depth && indent === (depth - 1) * 4 && effective.slice(i + 1).every((x) => x.trim() === 'done')) { cls = 'lp-list'; depth -= 1; }
+      else if (/^[A-Z_][A-Z0-9_]*=".*" \\$/.test(t)) cls = 'lp-env';
+      return h('span', { class: 'lp-line ' + cls }, ln + '\n');
+    });
+    const shown = h('pre', { class: 'lp-pre' }, ...lines);
+    const written = h('pre', { class: 'lp-pre', hidden: '' }, cur.value.trim());
+    const pick = (k) => (ev) => {
+      shown.hidden = k !== 'run';
+      written.hidden = k === 'run';
+      ev.currentTarget.parentNode.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === ev.currentTarget)));
+    };
+    const toggle = h('span', { class: 'seg lp-seg' },
+      h('button', { type: 'button', 'aria-pressed': 'true', onclick: pick('run') }, 'as it runs'),
+      h('button', { type: 'button', 'aria-pressed': 'false', onclick: pick('written') }, 'as written'));
+    const what = lists.map((l) => 'the list "' + l.block + '" (' + l.values + ' values)').join(', ');
+    const legend = h('span', { class: 'hint lp-legend' },
+      lists.length ? h('span', { class: 'lp-list-k' }, 'loop over ' + what + ', around the command loop') : '',
+      h('span', { class: 'lp-env-k' }, 'set at @@LOOP_ENV@@'));
+    const title = 'show the loop' + (lists.length ? ' (with ' + (lists.length === 1 ? 'a list' : lists.length + ' lists') + ' looped over)' : '');
+    kids.push(h('details', { class: 'lp-text' }, h('summary', {}, title), h('div', { class: 'lp-bar' }, toggle, legend), shown, written));
+  }
   kids.push(h('div', { class: 'lp-row' }, h('span', { class: 'lp-key', title: 'Defined by "for x in ..." in the loop; evaluated in the container' }, 'Loop variables'),
-    ...(info ? (info.loop_vars.length ? info.loop_vars.map((n) => h('code', { class: 'scope-chip loopvar' }, '$' + n)) : [h('span', { class: 'hint' }, 'none')]) : [h('span', { class: 'hint' }, '...')])));
+    ...(info ? (info.loop_vars.length ? info.loop_vars.map((n) => {
+      const l = (info.lists || []).find((x) => x.loop_var === n);
+      return h('code', { class: 'scope-chip loopvar' + (l ? ' fromlist' : ''),
+        title: l ? 'from the list "' + l.block + '": ' + l.values + ' values ($' + l.var + ' in the variables)' : 'defined by the command loop' },
+      '$' + n, l ? h('small', {}, ' list "' + l.block + '" x' + l.values) : '');
+    }) : [h('span', { class: 'hint' }, 'none')]) : [h('span', { class: 'hint' }, '...')])));
   for (const u of info?.undefined || []) kids.push(h('p', { class: 'pk-warn' }, `$${u.var} is used by ${u.used_by.join(', ')} but this loop does not define it`));
 
   // @@LOOP_ENV@@: automatic ones (value uses a loop variable) + the ones chosen in loop.env
@@ -557,19 +649,20 @@ async function editTemplate() {
 
 /* ---------- drawing ---------- */
 
-function pickerCard({ bid, label, tag, rows, selected, onPick, onAdd, onEdit, onBlock, onRemove, onDiff, footer }) {
+function pickerCard({ bid, label, tag, list, rows, selected, onPick, onAdd, onEdit, onBlock, onRemove, onDiff, footer, body }) {
   return h('div', { class: 'card', 'data-bid': bid ?? '' },
     h('div', { class: 'card-head' },
       bid ? h('span', { class: 'grip', draggable: 'true', tabindex: '0', role: 'button', 'data-grip': bid, 'aria-label': `Move the block ${label}`,
         title: 'Drag to move this block (or focus it and use the arrow keys). Order matters: a later block overrides the variables an earlier one sets.' }, '⠿') : '',
       h('h3', { title: label }, label),
       tag ? h('span', { class: 'tag', title: tag }, 'path') : '',
-      h('button', { class: 'tiny', type: 'button', title: 'Add an option', onclick: onAdd }, 'Add'),
+      list ? h('span', { class: 'tag list', title: 'A list block: one option per value, and "all" loops over them' }, 'list') : '',
+      h('button', { class: 'tiny', type: 'button', title: list ? 'Edit the values of the list' : 'Add an option', onclick: onAdd }, list ? 'Values' : 'Add'),
       onDiff && rows.length > 1 ? h('button', { class: 'tiny', type: 'button', title: 'Compare two options of this block: the variables and the config they give', onclick: onDiff }, 'Diff') : '',
       onBlock ? h('button', { class: 'tiny', type: 'button', title: 'Rename the block or change its path', onclick: onBlock }, 'Block') : '',
       onRemove ? h('button', { class: 'tiny', type: 'button', title: 'Remove this block from the XP', onclick: onRemove }, 'Remove') : ''),
-    h('div', { class: 'rows' },
-      ...rows.map((r) => h('div', { class: 'item', 'data-row': r.name },
+    body || h('div', { class: 'rows' },
+      ...rows.map((r) => h('div', { class: 'item' + (r.loop ? ' loop-all' : ''), 'data-row': r.name, title: r.loop ? 'Runs the command loop once per value of the list' : null },
         h('button', { class: 'row', type: 'button', title: r.preview || '(empty)', 'aria-pressed': String(r.name === selected), onclick: () => onPick(r.name) },
           h('span', { class: 'name' }, r.name,
             r.norun ? h('span', { class: 'norun-badge', title: 'No run from the Results filter matches this option' + (r.norun.out ? ` (${r.norun.out} filtered out)` : '') + '. Delete it from Results > Runs, or with Edit.' }, 'no runs') : ''),
@@ -648,8 +741,32 @@ function diffDialog(bid) {
   run();
 }
 
+/* move an XP in the side panel: before / after another one */
+async function moveXp(name, target, after) {
+  try {
+    await commit((c) => {
+      const i = c.xps.findIndex((x) => x.name === name);
+      const [moved] = c.xps.splice(i, 1);
+      const j = c.xps.findIndex((x) => x.name === target);
+      c.xps.splice(after ? j + 1 : j, 0, moved);
+    });
+  } catch (e) { status(e.message, true); return; }
+  document.querySelector(`.xp-grip[data-xp="${CSS.escape(name)}"]`)?.focus();
+}
+
+let movingXp = null;
 function drawSide() {
-  $('#xps').replaceChildren(...cfg.xps.map((x) => h('li', { class: 'xp', 'aria-current': String(x.name === st.xp) },
+  $('#xps').replaceChildren(...cfg.xps.map((x, i) => h('li', { class: 'xp', 'aria-current': String(x.name === st.xp), 'data-xp': x.name },
+    h('span', { class: 'grip xp-grip', draggable: 'true', tabindex: '0', role: 'button', 'data-xp': x.name, 'aria-label': `Move the XP ${x.name}`,
+      title: 'Drag to reorder the XPs (or focus it and use the up / down arrow keys)',
+      ondragstart: (ev) => { movingXp = x.name; ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', x.name); ev.currentTarget.closest('li').classList.add('moving'); },
+      ondragend: () => { movingXp = null; document.querySelectorAll('#xps li').forEach((li) => li.classList.remove('moving', 'drop-before', 'drop-after')); },
+      onkeydown: (ev) => {
+        if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+        ev.preventDefault();
+        const j = ev.key === 'ArrowUp' ? i - 1 : i + 1;
+        if (j >= 0 && j < cfg.xps.length) moveXp(x.name, cfg.xps[j].name, ev.key === 'ArrowDown');
+      } }, '⠿'),
     h('button', {
       class: 'pick', type: 'button', title: x.name,
       onclick: () => { st.xp = x.name; syncSelection(); draw(); if (matchMedia('(max-width: 800px)').matches) setCollapsed(true); },
@@ -660,6 +777,49 @@ function drawSide() {
   $('#xpname').textContent = st.xp ?? '';
 }
 
+/* the body of a list block's card: loop over all the values, or one value */
+function listBody(b) {
+  const all = b.rows.find((r) => r.loop_all);
+  const values = b.rows.filter((r) => !r.loop_all);
+  const c = st.blocks[b.id];
+  const looping = !!all && c === all.name;
+  const picked = looping ? values.map((r) => r.name) : Array.isArray(c) ? c : [c];   // the values in use
+  const name = fullName(b, b.var);
+  const lv = name.toLowerCase();
+  const set = (v) => { st.blocks[b.id] = v; draw(); };
+  const toggle = (n) => {
+    if (!all) { set(n); return; }                              // a list that does not loop: one value
+    if (looping) { set([n]); return; }                         // from "all": only this one
+    const now = picked.includes(n) ? picked.filter((x) => x !== n) : [...picked, n];
+    if (!now.length) { status('Keep at least one value (or loop over all of them)', true); return; }
+    set(values.map((r) => r.name).filter((x) => now.includes(x)));   // in the order of the list
+  };
+  const mode = all ? h('div', { class: 'seg lb-mode', role: 'group', 'aria-label': `How ${b.label} is used` },
+    h('button', { type: 'button', 'aria-pressed': String(looping), title: `Run the command loop once per value ($${name} -> \${${lv}})`, onclick: () => set(all.name) }, `\u21bb Loop over all ${values.length}`),
+    h('button', { type: 'button', 'aria-pressed': String(!looping), title: 'Tick the values to use: one sets the variable, several are looped over',
+      onclick: () => { if (looping) set([values[0].name]); } }, looping ? 'Selected' : `Selected (${picked.length})`)) : '';
+  const n = picked.length;
+  const say = looping || n > 1
+    ? h('p', { class: 'lb-say loop' }, `The whole command loop runs once per ${looping ? '' : 'ticked '}value (`, h('b', {}, `${n}\u00d7`), '), as the outermost loop: ',
+      h('code', {}, `$${name}`), ' becomes ', h('code', {}, `\${${lv}}`), '. See "show the loop" in Run.')
+    : h('p', { class: 'lb-say' }, h('code', {}, name), ' = ', h('b', {}, picked[0]), all ? '. Tick more values to loop over them.' : '.');
+  const list = h('div', { class: 'rows lb-values' + (looping ? ' looping' : '') },
+    ...values.map((r) => {
+      const it = b.items.find((x) => (x.label || x.value) === r.name) || { value: r.name };
+      const on = picked.includes(r.name);
+      return h('div', { class: 'item', 'data-row': r.name },
+        h('button', { class: 'row lb-row' + (on ? ' on' : ''), type: 'button', role: all ? 'checkbox' : 'radio', 'aria-checked': String(on),
+          title: `${name}=${it.value}` + (looping ? '\nClick to use only this value' : all ? '\nClick to tick / untick it' : ''), onclick: () => toggle(r.name) },
+          h('span', { class: 'lb-tick', 'aria-hidden': 'true' }, on ? '\u2713' : ''),
+          h('span', { class: 'lb-text' }, h('span', { class: 'name' }, it.label || it.value), it.label ? h('code', {}, it.value) : '')));
+    }));
+  const tools = all && !looping ? h('div', { class: 'lb-tools' },
+    h('button', { type: 'button', class: 'tiny', onclick: () => set(all.name) }, 'all'),
+    h('button', { type: 'button', class: 'tiny', onclick: () => set([values[0].name]) }, 'only the first'),
+    h('span', { class: 'hint' }, `${n} of ${values.length}`)) : '';
+  return h('div', { class: 'lb' }, mode, say, tools, list);
+}
+
 function drawStrip() {
   const xp = xpDef();
   const cards = [];
@@ -667,12 +827,13 @@ function drawStrip() {
   for (const b of xp?.blocks || []) {
     const bid = b.id;
     cards.push(pickerCard({
-      bid, label: b.label, tag: b.path, selected: st.blocks[bid],
+      bid, label: b.label, tag: b.path, list: b.kind === 'list', selected: st.blocks[bid],
       rows: b.rows.map((r) => ({ name: r.name, preview: Object.entries(r.vars).map(([k, v]) => `${k}=${v}`).join('\n'),
-        norun: noRunOf.get(`${bid}\u0000${r.name}`) })),
+        norun: noRunOf.get(`${bid}\u0000${r.name}`), loop: !!r.loop_all })),
       onPick: (name) => { st.blocks[bid] = name; draw(); },
       onAdd: () => editOption(bid, null), onEdit: (name) => editOption(bid, name),
       onBlock: () => editBlock(bid), onRemove: () => removeBlock(bid), onDiff: () => diffDialog(bid),
+      body: b.kind === 'list' ? listBody(b) : null,
       footer: h('div', { class: 'card-vars', 'data-bid': bid, 'aria-label': `Variables set by ${b.label}` }, ...blockVars(b)),
     }));
   }
@@ -709,32 +870,68 @@ function varField(group, v) {
       h('button', { class: 'tiny', type: 'button', onclick: () => pickConfig(v.name, input) }, 'Browse'),
       h('button', { class: 'tiny', type: 'button', title: `A base config for this XP, written in ${genDir(st.xp)} (works whatever the commit)`, onclick: () => newConfig(input.value.trim()) }, 'New...'),
       h('button', { class: 'tiny', type: 'button', 'data-genedit': '', title: 'Edit the base config written by the launcher', onclick: () => editConfigFile(input.value.trim()) }, 'Edit file')) : '';
-  return h('div', { class: 'field', 'data-var': v.name },
-    group === 'process'
-      ? h('label', { for: 'f-' + v.name, title: v.label ? v.name : '' }, h('span', { class: 'scope-badge', 'data-scope': v.name }), v.label || v.name)
-      : h('label', { for: 'f-' + v.name }, h('span', { class: 'scope-badge', 'data-scope': v.name }), v.label || v.name, h('code', {}, v.label ? v.name : '')),
-    h('div', { class: 'field-row' }, input, extra,
-      h('button', { class: 'tiny', type: 'button', 'aria-label': `Edit ${v.name}`, onclick: () => editVar(group, v.name) }, 'Edit'), reset),
-    h('span', { class: 'src', 'data-src': v.name }),
-    chips.length ? h('div', { class: 'chips' }, ...chips) : '');
+  // one line: scope | label (name under it) | value (+ where it comes from) | suggested values | buttons
+  return h('div', { class: 'field vrow', 'data-var': v.name, 'data-search': `${v.label} ${v.name}`.toLowerCase() },
+    h('span', { class: 'scope-badge', 'data-scope': v.name }),
+    h('label', { for: 'f-' + v.name, class: 'vlabel', title: v.name }, v.label || short2(v.name), v.label ? h('code', {}, v.name) : ''),
+    h('div', { class: 'vval' }, h('div', { class: 'field-row' }, input, reset), extra ? h('div', { class: 'vextra' }, extra) : '', h('span', { class: 'src', 'data-src': v.name })),
+    h('div', { class: 'chips' }, ...chips),
+    h('div', { class: 'vact' },
+      h('button', { class: 'tiny', type: 'button', 'aria-label': `Edit ${v.name}`, title: 'Edit the variable (label, default value, suggested values, -e)', onclick: () => editVar(group, v.name) }, 'Edit')));
 }
 
+/* a variable worth showing for this selection: edited, with suggested values, set by a block or the loop, or the
+   config / commit; the others (defaults never touched) are folded */
+function important(v) {
+  const e = table[v.name];
+  return st.values[v.name] !== undefined || (v.options || []).length > 0 || [cfg.project.config_var, cfg.project.commit_var].includes(v.name)
+    || (e && (!['default', 'edited'].includes(e.source) || e.loop));
+}
+let shownVars = '';
+const varFilter = { text: '' };
+
 function drawVars() {
-  $('#vars').replaceChildren(...GROUPS.map(([g, title, note]) => {
-    const d = h('details', { class: 'vgroup' },
-      h('summary', {}, title, h('span', { class: 'hint' }, note)),
-      g === 'run' ? h('div', { id: 'looppanel', class: 'looppanel' }) : '',
-      h('div', { class: 'scalars' }, ...cfg.variables[g].map((v) => varField(g, v))),
-      h('button', { class: 'ghost', type: 'button', onclick: () => editVar(g, null) }, '+ Add variable'));
-    if (!closedGroups.has(g)) d.setAttribute('open', '');
-    d.addEventListener('toggle', () => { if (d.open) closedGroups.delete(g); else closedGroups.add(g); });
-    return d;
-  }));
+  const all = GROUPS.flatMap(([g]) => cfg.variables[g]);
+  shownVars = all.filter(important).map((v) => v.name).join(',');
+  const filter = h('input', { type: 'search', class: 'vfilter', placeholder: 'filter the variables (label, name)', value: varFilter.text, 'aria-label': 'Filter the variables' });
+  filter.addEventListener('input', () => { varFilter.text = filter.value; applyFilter(); });
+  $('#vars').replaceChildren(h('div', { class: 'vtools' }, filter, h('span', { class: 'hint' }, `${all.length} variables; the ones not used by this selection are folded`)),
+    ...GROUPS.map(([g, title, note]) => {
+      const vars = cfg.variables[g];
+      const main = vars.filter(important), rest = vars.filter((v) => !important(v));
+      const more = rest.length ? h('details', { class: 'vmore' }, h('summary', {}, `${rest.length} more (defaults)`, h('span', { class: 'hint' }, ` ${rest.map((v) => v.label || short2(v.name)).join(', ')}`)),
+        h('div', { class: 'vtable' }, ...rest.map((v) => varField(g, v)))) : '';
+      const d = h('details', { class: 'vgroup' },
+        h('summary', {}, title, h('span', { class: 'hint' }, note)),
+        g === 'run' ? h('div', { id: 'looppanel', class: 'looppanel' }) : '',
+        h('div', { class: 'vtable' }, ...main.map((v) => varField(g, v))),
+        more,
+        h('button', { class: 'ghost', type: 'button', onclick: () => editVar(g, null) }, '+ Add variable'));
+      if (!closedGroups.has(g)) d.setAttribute('open', '');
+      d.addEventListener('toggle', () => { if (d.open) closedGroups.delete(g); else closedGroups.add(g); });
+      return d;
+    }));
   syncChips();
   drawLoopPanel();
+  applyFilter();
+}
+
+/* the filter box: only the matching variables, folded ones included */
+function applyFilter() {
+  const q = varFilter.text.trim().toLowerCase();
+  document.querySelectorAll('#vars .vrow').forEach((r) => {
+    const val = (r.querySelector('textarea, input')?.value || '').toLowerCase();
+    r.hidden = !!q && !r.dataset.search.includes(q) && !val.includes(q);
+  });
+  document.querySelectorAll('#vars .vmore').forEach((m) => {
+    if (q) { m.dataset.wasOpen ??= String(m.open); m.open = [...m.querySelectorAll('.vrow')].some((r) => !r.hidden); } else if (m.dataset.wasOpen) { m.open = m.dataset.wasOpen === 'true'; delete m.dataset.wasOpen; }
+  });
 }
 
 function applyTable() {
+  // a variable that this selection now uses (set by a block...) comes out of the folded ones, and back
+  const now = GROUPS.flatMap(([g]) => cfg.variables[g]).filter(important).map((v) => v.name).join(',');
+  if (now !== shownVars && !document.querySelector('#vars textarea:focus')) drawVars();
   document.querySelectorAll('.field').forEach((f) => {
     const name = f.dataset.var, e = table[name], input = f.querySelector('textarea, input');
     if (e && st.values[name] === undefined && document.activeElement !== input && input.value !== e.value) setValue(input, e.value);
@@ -853,6 +1050,10 @@ function dropSpot(ev) {
 
 async function dropVar(src, bid, row, move) {
   if (src.bid === bid && src.row === row) return;
+  if (blk(bid)?.kind === 'list' || blk(src.bid)?.kind === 'list') {
+    status('The options of a list block are made from its values: edit the list (Values) instead', true);
+    return;
+  }
   const tb = blk(bid), sb = blk(src.bid);
   const target = tb.rows.find((r) => r.name === row);
   const rel = tb.path && src.full.startsWith(tb.path) && src.full.length > tb.path.length ? src.full.slice(tb.path.length) : src.full;
@@ -920,6 +1121,28 @@ function blockSpot(ev) {
   const r = card.getBoundingClientRect();
   return { card, bid: card.dataset.bid, after: ev.clientX > r.left + r.width / 2 };
 }
+/* while a block or a variable is dragged, the strip scrolls when the pointer is near its left / right edge */
+const autoScroll = { v: 0, raf: 0 };
+function scrollStep() {
+  if (!autoScroll.v) { autoScroll.raf = 0; return; }
+  strip.scrollLeft += autoScroll.v;
+  autoScroll.raf = requestAnimationFrame(scrollStep);
+}
+function stopAutoScroll() { autoScroll.v = 0; strip.classList.remove('autoscrolling'); }
+document.addEventListener('dragover', (ev) => {
+  if (!movingBlock && !dragged) return;
+  const r = strip.getBoundingClientRect(), edge = Math.min(90, r.width / 4);
+  let v = 0;
+  if (ev.clientY > r.top - 40 && ev.clientY < r.bottom + 40) {
+    if (ev.clientX < r.left + edge) v = -Math.ceil(((r.left + edge - ev.clientX) / edge) * 18);
+    else if (ev.clientX > r.right - edge) v = Math.ceil(((ev.clientX - (r.right - edge)) / edge) * 18);
+  }
+  autoScroll.v = Math.max(-24, Math.min(24, v));
+  strip.classList.toggle('autoscrolling', !!autoScroll.v);
+  if (autoScroll.v && !autoScroll.raf) autoScroll.raf = requestAnimationFrame(scrollStep);
+});
+['dragend', 'drop'].forEach((t) => document.addEventListener(t, stopAutoScroll, true));
+
 strip.addEventListener('dragover', (ev) => {
   if (movingBlock) {
     const spot = blockSpot(ev);
@@ -969,6 +1192,28 @@ $('#settings').addEventListener('click', editSettings);
 $('#template').addEventListener('click', editTemplate);
 $('#tab-yaml').addEventListener('click', () => setPvTab('yaml'));
 $('#tab-script').addEventListener('click', () => setPvTab('script'));
+
+// dropping an XP in the side panel
+const xpList = $('#xps');
+const xpSpot = (ev) => {
+  const li = ev.target.closest('#xps li');
+  if (!li || !movingXp) return null;
+  const r = li.getBoundingClientRect();
+  return { li, name: li.dataset.xp, after: ev.clientY > r.top + r.height / 2 };
+};
+xpList.addEventListener('dragover', (ev) => {
+  const spot = xpSpot(ev);
+  if (!spot) return;
+  ev.preventDefault();
+  xpList.querySelectorAll('li').forEach((li) => li.classList.toggle('drop-before', li === spot.li && !spot.after));
+  xpList.querySelectorAll('li').forEach((li) => li.classList.toggle('drop-after', li === spot.li && spot.after));
+});
+xpList.addEventListener('drop', (ev) => {
+  const spot = xpSpot(ev), name = movingXp;
+  if (!spot || !name) return;
+  ev.preventDefault();
+  if (spot.name !== name) moveXp(name, spot.name, spot.after);
+});
 
 let stored = null;
 try { stored = localStorage.getItem('xp-side-collapsed'); } catch (e) { /* storage unavailable */ }

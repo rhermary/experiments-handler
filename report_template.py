@@ -180,8 +180,8 @@ def matches(run, conds):
             ok = missing
         elif op == "IS NOT NULL":
             ok = not missing
-        elif missing:
-            ok = op in ("!=", "NOT LIKE", "NOT IN")
+        elif missing:                    # = 'None': MLflow logs nothing for a null object (feature_loss: null)
+            ok = op in ("!=", "NOT LIKE", "NOT IN") or (op == "=" and str(want) == "None")
         elif op in ("IN", "NOT IN"):
             ok = (str(got) in [str(w) if not isinstance(w, float) or not w.is_integer() else str(int(w)) for w in want]
                   or any(_num(got) is not None and _num(got) == _num(w) for w in want)) == (op == "IN")

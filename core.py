@@ -64,7 +64,7 @@ LOOP_VAR = re.compile(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b")
 PLACEHOLDER = re.compile(r"@@(\w+)@@")
 PROJECT_DEFAULTS = {"root": ".", "scripts_dir": "scripts", "src_dir": "src",
                     "env_prefix": "APP_", "env_sep": "__", "config_var": "CONFIG", "commit_var": "COMMIT",
-                    "tracking_uri": "mlruns"}                    # MLflow tracking URI (a folder, sqlite:///..., postgresql://...)
+                    "tracking_uri": "sqlite:///mlflow.db"}     # MLflow tracking URI (sqlite:///..., postgresql://..., http://...)
 
 HEADER_COMMENT = """\
 # XP launcher configuration (version 3). The page edits this file; the previous version is kept
@@ -82,6 +82,8 @@ HEADER_COMMENT = """\
 # servers     GPU servers for the GPU view (name, host, port, user); reached with ssh
 # xps         name + its own ordered list of blocks: id, label, path (env-var prefix), rows;
 #             a row sets variables {key: value}. Blocks are not shared between XPs.
+#             kind: list -> var, items [{value, label}], vars (built from $VAR), loop: the options are one per value,
+#             and "all (N)" that runs the command loop once per value (for var.lower() in values).
 """
 
 
@@ -91,6 +93,35 @@ def _text(v):
     if isinstance(v, bool):
         return "true" if v else "false"
     return str(v)
+
+
+# Where things are on a server. Defaults from one base folder; each can be changed per server (Settings > Servers).
+PATH_KEYS = ("base", "db_pattern", "psql_sock", "pg_port", "artifacts", "checkpoints", "launcher",
+             "synchronised", "sync_sock", "sync_port", "scripts", "empty_db", "db_image")
+DEFAULT_BASE = "/data/experiments"
+
+
+def server_paths(sv):
+    """Every path the launcher uses on a server: its own Postgres (data folders named <server>_<YYYY.MM.DD>_db,
+    socket, port), artifacts, checkpoints, the launcher's folder (repo mirror, launches, queue), and, on the central
+    server, the synchronised data (database folders db_<YYYY.MM.DD>, its own socket and port, artifacts,
+    checkpoints)."""
+    over = sv.get("paths") or {}
+    base = over.get("base") or DEFAULT_BASE
+    sync = over.get("synchronised") or f"{base}/synchronised"
+    out = {"base": base, "db_pattern": f"{base}/{sv['name'].lower()}_*_db", "psql_sock": f"{base}/psql_sock",
+           "pg_port": "5555", "artifacts": f"{base}/artifacts", "checkpoints": f"{base}/checkpoints",
+           "launcher": f"{base}/launcher", "synchronised": sync, "sync_sock": f"{sync}/psql_sock", "sync_port": "5556",
+           "scripts": f"{base}/scripts", "empty_db": f"{base}/_empty_db", "db_image": ""}
+    out.update({k: v for k, v in over.items() if v})
+    out.update({"repo": f"{out['launcher']}/repo", "launches": f"{out['launcher']}/launches", "queue": f"{out['launcher']}/queue",
+                "sync_db_pattern": f"{out['synchronised']}/db_*", "sync_artifacts": f"{out['synchronised']}/artifacts",
+                "sync_checkpoints": f"{out['synchronised']}/checkpoints"})
+    return out
+
+
+def central_server(cfg):
+    return next((s for s in cfg["servers"] if s.get("central") and "name" in s), None)
 
 
 def active_servers(cfg):
@@ -218,8 +249,24 @@ def normalize(raw):
         user = _text(sv.get("user")).strip()
         if user and not re.fullmatch(r"[\w.\-]+", user):
             raise ValueError(f"servers: user of '{name}' is not valid")
+        paths = {}
+        for k, v in (sv.get("paths") or {}).items():
+            if k not in PATH_KEYS:
+                raise ValueError(f"servers: '{name}' has an unknown path '{k}' (known: {', '.join(PATH_KEYS)})")
+            v = _text(v).strip()
+            if v and v != server_paths({"name": name}).get(k):     # only what differs from the defaults is kept
+                if k.endswith("_port"):
+                    if not v.isdigit():
+                        raise ValueError(f"servers: {k} of '{name}' must be a number")
+                elif not v.startswith("/") and k not in ("db_pattern", "db_image"):
+                    raise ValueError(f"servers: path '{k}' of '{name}' must be absolute ({v})")
+                paths[k] = v
         servers.append({"name": name, "host": host, "port": int(port), "user": user,
-                        **({"disabled": True} if sv.get("disabled") else {})})
+                        **({"disabled": True} if sv.get("disabled") else {}),
+                        **({"central": True} if sv.get("central") else {}),
+                        **({"paths": paths} if paths else {})})
+    if sum(1 for s in servers if s.get("central")) > 1:
+        raise ValueError("servers: only one server can be the central one (where the synchronised data lives)")
     return {"version": 3, "project": p, "variables": variables, "loop": loop, "xps": xps, "servers": servers}
 
 
@@ -316,6 +363,45 @@ def _layout(raw):
             "std": bool(raw.get("std", True)), "missing": bool(raw.get("missing", True))}
 
 
+ITEM_RE = re.compile(r"^[\w.:/@+=,-]+$")            # a list value: usable as a word of a shell for loop
+
+
+def _list_block(b, block, where, prefix):
+    """A list block: a variable (var) and its values (items: [{value, label}]), plus variables built from it (vars,
+    using $VAR). Its options are generated: one per value, and "all (N)" (loop: true) that runs the command loop
+    once per value (the variable becomes the shell loop variable var.lower())."""
+    var = _text(b.get("var")).strip()
+    if not NAME_RE.match(full_name(block, var, prefix) if var else ""):
+        raise ValueError(f"{where}: the list needs a variable name (letters, digits, _)")
+    items, seen = [], set()
+    for it in b.get("items") or []:
+        value = _text(it.get("value") if isinstance(it, dict) else it).strip()
+        label = _text(it.get("label") if isinstance(it, dict) else "").strip()
+        if not value:
+            continue
+        if not ITEM_RE.match(value):
+            raise ValueError(f"{where}: '{value}' cannot be a list value (no spaces or quotes: letters, digits and ._:/@+=,-)")
+        if (label or value) in seen:
+            raise ValueError(f"{where}: '{label or value}' is in the list twice")
+        seen.add(label or value)
+        items.append({"value": value, **({"label": label} if label else {})})
+    if not items:
+        raise ValueError(f"{where}: the list is empty")
+    templates = {}
+    for k, val in (b.get("vars") or {}).items():
+        k = _text(k).strip()
+        if not NAME_RE.match(full_name(block, k, prefix)):
+            raise ValueError(f"{where}: '{full_name(block, k, prefix)}' is not a valid variable name")
+        templates[k] = _text(val)
+    loop = bool(b.get("loop", True))
+    lv = full_name(block, var, prefix).lower()
+    block.update(kind="list", var=var, items=items, vars=templates, loop=loop)
+    rows = [{"name": f"all ({len(items)})", "vars": {var: "${" + lv + "}", **templates}, "loop_all": True}] if loop and len(items) > 1 else []
+    rows += [{"name": it.get("label") or it["value"], "vars": {var: it["value"], **templates}} for it in items]
+    block["rows"] = rows
+    return block
+
+
 def _block(b, xp, ids, prefix):
     bid = _text(b.get("id")).strip() or slug(b.get("label") or "block")
     if bid in ids:
@@ -323,6 +409,8 @@ def _block(b, xp, ids, prefix):
     ids.add(bid)
     block = {"id": bid, "label": _text(b.get("label")) or bid, "path": _text(b.get("path")), "rows": []}
     where = f"XP '{xp}', block '{block['label']}'"
+    if b.get("kind") == "list":
+        return _list_block(b, block, where, prefix)
     names = set()
     for r in b.get("rows") or []:
         name = _text(r.get("name")).strip()
@@ -368,6 +456,9 @@ _Dumper.add_representer(str, lambda d, s: d.represent_scalar("tag:yaml.org,2002:
 
 
 def dump(cfg):
+    # the options of a list block are made from its values when the file is read: not written
+    cfg = {**cfg, "xps": [{**x, "blocks": [{k: v for k, v in b.items() if not (b.get("kind") == "list" and k == "rows")}
+                                           for b in x["blocks"]]} for x in cfg["xps"]]}
     return HEADER_COMMENT + "\n" + yaml.dump(cfg, Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=1000)
 
 
@@ -457,18 +548,58 @@ def collect(cfg, sel):
     header = [f"# Generated by XP launcher on {datetime.now():%Y-%m-%d %H:%M:%S}", f"# XP: {xp['name']}"]
     chosen = sel.get("blocks") or {}
     for b in xp["blocks"]:
-        row = pick(b["rows"], chosen.get(b["id"]), b["label"])
+        row = list_row(b, chosen.get(b["id"])) if b.get("kind") == "list" else pick(b["rows"], chosen.get(b["id"]), b["label"])
         header.append(f"# {b['label']}: {row['name']}")
         for k, val in row["vars"].items():
             put(full_name(b, k, prefix), val, "entity", False, f"{b['label']}: {row['name']}")
     for name, val in (sel.get("values") or {}).items():
         if name in table:
             table[name].update(value=_text(val), source="edited")
+    looped = set()
+    for name, lv, items in list_loops(cfg, sel):              # "all (N)" of a list block: $VAR -> ${var} of the loop
+        header.append(f"# {name}: looped over {len(items)} values (${{{lv}}})")
+        ref = re.compile(r"\$(?:\{" + name + r"\}|" + name + r"(?![A-Za-z0-9_]))")
+        for e in table.values():
+            e["value"] = ref.sub("${" + lv + "}", e["value"])
+        looped.add(name)
     for e in table.values():
         e["uses_loop"] = bool(LOOP_REF.search(e["value"]))
-        e["loop"] = bool(e["env"] and e["uses_loop"]) or e["name"] in cfg["loop"]["env"]
+        e["loop"] = bool(e["env"] and e["uses_loop"]) or e["name"] in cfg["loop"]["env"] or e["name"] in looped
         e["scope"] = "loop" if e["loop"] else "container" if e["env"] else "script"
     return table, header
+
+
+def list_row(b, choice):
+    """The option of a list block for a selection: a row name ("all (N)" or one value), or a list of row names
+    (selected values: one value as its row, several as a loop over them, like "all" but on those values only)."""
+    if not isinstance(choice, list):
+        return pick(b["rows"], choice, b["label"])
+    names = [n for n in dict.fromkeys(choice) if any(r["name"] == n and not r.get("loop_all") for r in b["rows"])]
+    if not names:
+        raise ValueError(f"no value selected in the list {b['label']}")
+    if len(names) == 1:
+        return pick(b["rows"], names[0], b["label"])
+    loop = next((r for r in b["rows"] if r.get("loop_all")), None)
+    if loop is None:
+        raise ValueError(f"the list {b['label']} does not loop: select one value")
+    values = [it["value"] for it in b["items"] if (it.get("label") or it["value"]) in names]
+    return {**loop, "name": f"{len(values)} selected", "selected": values}
+
+
+def list_loops(cfg, sel):
+    """[(variable, loop variable, values)] of the list blocks looped over: "all (N)" or several selected values
+    (outer loop first)."""
+    xp = xp_of(cfg, sel.get("xp"))
+    prefix, out = cfg["project"]["env_prefix"], []
+    chosen = sel.get("blocks") or {}
+    for b in xp["blocks"]:
+        if b.get("kind") != "list":
+            continue
+        row = list_row(b, chosen.get(b["id"]))
+        if row.get("loop_all"):
+            name = full_name(b, b["var"], prefix)
+            out.append((name, name.lower(), row.get("selected") or [it["value"] for it in b["items"]]))
+    return out
 
 
 def _inject_loop_env(text, lines):
@@ -525,7 +656,7 @@ def render(cfg, sel):
             header.append(f"# {name} not passed: it is empty for this XP")
             continue
         v = e["value"]
-        if not e["env"]:
+        if not e["env"] and not (e["loop"] and e["uses_loop"]):   # set inside the loop only (${window}, ${run_id})
             shell.append(f'{name}="{dq(v)}"')
         if e["loop"]:
             loop_env.append(outer_escape(f'{name}="{dq(v)}"') + " \\")
@@ -539,7 +670,25 @@ def render(cfg, sel):
         names = [e["name"] for e in table.values() if e["loop"]]
         raise ValueError(f"{', '.join(names)} must be set inside the loop but the command loop \"{row['name']}\" "
                          "has no @@LOOP_ENV@@ line")
-    slots["LOOP"] = _inject_loop_env(row["value"].strip("\n"), loop_env)
+    text = row["value"].strip("\n")
+    shown = text.replace("\\$", "$")                      # as the container runs it (\$ only defers it to the container)
+    lists = list_loops(cfg, sel)
+    labels = {full_name(b, b["var"], cfg["project"]["env_prefix"]): b["label"]
+              for b in xp_of(cfg, sel["xp"])["blocks"] if b.get("kind") == "list"}
+    for name, lv, items in reversed(lists):                  # list blocks looped over: around the command loop
+        ref = re.compile(r"\$(?:\{" + name + r"\}|" + name + r"(?![A-Za-z0-9_]))")
+        text = ref.sub(lambda _m, lv=lv: "\\${" + lv + "}", text)
+        shown = ref.sub(lambda _m, lv=lv: "${" + lv + "}", shown)
+        head = f"for {lv} in {' '.join(items)}; do"
+        text = head + "\n" + "\n".join("    " + ln for ln in text.splitlines()) + "\ndone"
+        if len(items) > 2:                                    # shown: one value per line (the same shell command)
+            head = f"for {lv} in \\\n" + " \\\n".join("        " + i for i in items) + "; do"
+        shown = (f"# list \"{labels.get(name, name)}\": {len(items)} values\n" + head + "\n"
+                 + "\n".join("    " + ln for ln in shown.splitlines()) + "\ndone")
+    slots["LOOP"] = _inject_loop_env(text, loop_env)
+    # the loop as it runs for this selection, readable (no escaping for CMD): for the page
+    effective = _inject_loop_env(shown, [f'{n}="{e["value"]}" \\' for n, e in table.items()
+                                         if e["loop"] and n not in skip])
     config = (table.get(cfg["project"]["config_var"]) or {}).get("value", "").strip()
     slots["COPY_FILES"] = ""
     if is_generated(cfg, config):
@@ -551,7 +700,7 @@ def render(cfg, sel):
         q, parent = shlex.quote(gen), shlex.quote(posixpath.dirname(gen))
         slots["COPY_FILES"] = f"docker cp {q} $CONTAINER_ID:/tmp/xp-configs"
         slots["LOOP"] = f"mkdir -p {parent} && rm -rf {q} && cp -r /tmp/xp-configs {q} && " + slots["LOOP"]
-    defined = loop_vars(row["value"])
+    defined = loop_vars(row["value"]) + [lv for _, lv, _ in list_loops(cfg, sel)]
     unknown = {}
     for e in table.values():
         for m in re.finditer(r"\$\{?([a-z_][a-z0-9_]*)", e["value"]):
@@ -566,6 +715,8 @@ def render(cfg, sel):
     if left:
         raise ValueError(f"unknown placeholder @@{left[0]}@@ in template.sh")
     info = {"loop": row["name"], "loop_vars": defined, "has_loop_env": "@@LOOP_ENV@@" in row["value"],
+            "effective": effective,
+            "lists": [{"var": n, "loop_var": lv, "values": len(items), "block": labels.get(n, n)} for n, lv, items in lists],
             "undefined": [{"var": k, "used_by": v} for k, v in unknown.items()]}
     return out, list(table.values()), info
 

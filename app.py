@@ -19,7 +19,10 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 
 import checker
 import core
+import actions
 import diffview
+import remote
+import xpqueue
 import gpus
 import mlflow_ui
 import picker
@@ -28,7 +31,7 @@ import results
 import xpconfigs
 
 LAUNCH_WAIT_S = 30  # how long a launch waits for the script before reporting "still running"
-PAGES = {"index.html", "app.js", "editors.js", "argpicker.js", "gpus.js", "results.js", "router.js", "app.css", "favicon.svg", "apple-touch-icon.png"}
+PAGES = {"index.html", "app.js", "editors.js", "argpicker.js", "gpus.js", "results.js", "router.js", "queue.js", "servers.js", "app.css", "favicon.svg", "apple-touch-icon.png"}
 
 app = Flask(__name__, static_folder=None)
 app.json.sort_keys = False  # key order matters (order of variables, XPs, options)
@@ -474,6 +477,125 @@ def api_launch():
     return jsonify(path=_rel(cfg, path), running=False, returncode=proc.returncode, output=out)
 
 
+# --------------------------------------------------------------------------- servers (remote launches and syncs)
+
+_STATUS = {}                                                 # server name -> its state from the last "status" action
+
+
+def _server_view(sv):
+    return {**sv, "paths_all": core.server_paths(sv), "connected": remote.connected(sv), "status": _STATUS.get(sv["name"]),
+            "db": _DB.get(sv["name"])}
+
+
+@app.get("/api/servers")
+def api_servers():
+    """The servers of the settings, their paths, whether a connection is open (asked to the local ssh only), and
+    what the last status action read."""
+    cfg = core.load()
+    listed = [s for s in cfg["servers"] if "name" in s]
+    return jsonify(servers=[_server_view(s) for s in listed], central=(core.central_server(cfg) or {}).get("name"),
+                   path_keys=list(core.PATH_KEYS))
+
+
+_DB = {}                                                     # server name -> its databases from the last "db_status"
+
+
+def _image(cfg):
+    """The image to run the synchronised Postgres in, when the server sets none: the Docker image variable."""
+    return next((v["value"] for v in cfg["variables"]["docker"] if v["name"] == "IMAGE_NAME"), "")
+
+
+SERVER_ACTIONS = {
+    "connect": ("open the connection", lambda cfg, sv, a: remote.connect_steps(sv)),
+    "disconnect": ("close the connection", lambda cfg, sv, a: remote.disconnect_steps(sv)),
+    "status": ("read the state", lambda cfg, sv, a: remote.status_steps(sv)),
+    "db_status": ("read the databases", lambda cfg, sv, a: remote.db_status_steps(sv)),
+    "db_start": ("start a database", lambda cfg, sv, a: remote.db_start_steps(sv, a.get("which", "own"), a.get("folder"), bool(a.get("allow_modif")), _image(cfg))),
+    "db_stop": ("stop a database", lambda cfg, sv, a: remote.db_stop_steps(sv, a.get("which", "own"), a.get("container"))),
+    "db_new": ("create a database folder", lambda cfg, sv, a: remote.db_new_steps(sv, a.get("which", "own"), __import__("datetime").date.today().strftime("%Y.%m.%d"))),
+    "db_sizes": ("measure the database folders", lambda cfg, sv, a: remote.db_sizes_steps(sv, a.get("which", "own"))),
+    "db_scripts": ("show the database scripts", lambda cfg, sv, a: remote.db_scripts_steps(sv)),
+}
+
+
+@app.post("/api/servers/run")
+def api_servers_run():
+    """Body {server, action, dry}: dry -> the commands it would run; else run them (logged) and return the result."""
+    body = request.get_json(force=True)
+    cfg = core.load()
+    try:
+        sv = remote.server(cfg, str(body.get("server")))
+        what, build = SERVER_ACTIONS[str(body.get("action"))]
+    except KeyError:
+        return jsonify(error=f"unknown action '{body.get('action')}'"), 400
+    except ValueError as err:
+        return jsonify(error=str(err)), 400
+    try:
+        steps = build(cfg, sv, body.get("args") or {})
+    except ValueError as err:
+        return jsonify(error=str(err)), 400
+    if body.get("dry"):
+        return jsonify(plan=actions.plan(steps), title=f"{sv['name']}: {what}")
+    if body["action"] != "connect" and not remote.connected(sv):
+        return jsonify(error=f"{sv['name']} is not connected: click Connect first"), 400
+    res = actions.run(body["action"], sv["name"], f"{sv['name']}: {what}", steps)
+    if body["action"] == "status" and res["ok"]:
+        _STATUS[sv["name"]] = {**remote.parse_status(res["steps"][0]["out"]), "when": res["when"]}
+    if body["action"] == "db_status" and res["ok"]:
+        _DB[sv["name"]] = {**remote.parse_db_status(sv, res["steps"][0]["out"]), "when": res["when"]}
+    if body["action"] == "db_sizes" and res["ok"]:
+        sizes = {ln.split("\t", 1)[1]: int(ln.split("\t", 1)[0]) for ln in res["steps"][0]["out"].splitlines() if "\t" in ln}
+        _DB.setdefault(sv["name"], {}).setdefault("sizes", {}).update(sizes)
+    if body["action"] == "disconnect":
+        _STATUS.pop(sv["name"], None)
+        _DB.pop(sv["name"], None)
+    return jsonify(result={k: v for k, v in res.items() if k != "steps"}, steps=res["steps"], server=_server_view(sv))
+
+
+@app.get("/api/actions")
+def api_actions():
+    """The action log, newest first (?server=, ?kind=)."""
+    return jsonify(actions=actions.recent(200, request.args.get("server") or None, request.args.get("kind") or None))
+
+
+@app.get("/api/actions/<action_id>")
+def api_action(action_id):
+    try:
+        return jsonify(actions.read(action_id))
+    except ValueError as err:
+        return jsonify(error=str(err)), 404
+
+
+@app.get("/api/queue")
+def api_queue():
+    """The queue of experiments (launched one after the other when their GPUs are free)."""
+    xpqueue.start_thread()
+    return jsonify(xpqueue.view(request.args.get("gpus") == "1"))
+
+
+@app.post("/api/queue/add")
+def api_queue_add():
+    """Queue the selection: body {sel, mode: auto | fixed, count}. Its script is written now, the devices at start."""
+    body = request.get_json(force=True)
+    xpqueue.start_thread()
+    try:
+        item = xpqueue.add(core.load(), body["sel"], body.get("mode") or "auto", body.get("count"), bool(body.get("manual")))
+    except (ValueError, KeyError) as err:
+        return jsonify(error=str(err)), 400
+    return jsonify(item={k: v for k, v in item.items() if k != "script"}, queue=xpqueue.view())
+
+
+@app.post("/api/queue/act")
+def api_queue_act():
+    """Body {action: remove | up | down | retry | start | manual | auto | pause | resume | clear, id, devices}."""
+    body = request.get_json(force=True)
+    try:
+        xpqueue.act(str(body.get("action")), body.get("id"), body.get("devices"))
+    except ValueError as err:
+        return jsonify(error=str(err)), 400
+    return jsonify(xpqueue.view(True))
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 only on a network you trust: the app runs shell scripts")
@@ -486,4 +608,5 @@ if __name__ == "__main__":
     core.configure(args.config, args.template)
     print(f"settings: {core.CONFIG_PATH}\ntemplate: {core.template_path()}")
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))   # so that the MLflow server started here stops too
+    xpqueue.start_thread()
     app.run(host=args.host, port=args.port, threaded=True)

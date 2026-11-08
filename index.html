@@ -15,6 +15,7 @@
     <ul id="xps"></ul>
     <button class="ghost wide" id="newxp" type="button">+ New XP</button>
     <div class="side-foot">
+      <button class="ghost wide" id="queue" type="button" title="Experiments waiting for free GPUs, started one after the other">Queue</button>
       <button class="ghost wide" id="gpus" type="button" title="GPU usage on this machine">GPUs</button>
     </div>
   </aside>
@@ -54,6 +55,7 @@
       <span id="status" role="status"></span>
       <button class="ghost" id="status-act" type="button" hidden></button>
       <button id="generate" type="button">Generate script</button>
+      <button id="enqueue" type="button" title="Write the script now and start it when GPUs are free (only the devices are set then)">Add to queue</button>
       <button id="launch" class="primary" type="button">Launch</button>
     </div>
   </div>
@@ -66,6 +68,8 @@
 <script src="/argpicker.js"></script>
 <script src="/gpus.js"></script>
 <script src="/results.js"></script>
+<script src="/queue.js"></script>
+<script src="/servers.js"></script>
 <script src="/router.js"></script>
 </body>
 </html>

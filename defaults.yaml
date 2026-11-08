@@ -20,7 +20,7 @@ project:
   env_sep: __
   config_var: CONFIG
   commit_var: COMMIT
-  tracking_uri: mlruns
+  tracking_uri: sqlite:///mlflow.db
 variables:
   docker:
   - name: IMAGE_NAME

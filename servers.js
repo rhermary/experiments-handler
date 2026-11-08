@@ -1,0 +1,338 @@
+/* Servers and Databases tabs. Servers: the servers of the settings, their paths, the connection to each (opened when
+   you click Connect, over ssh with your agent), their state, and the log of every action. Databases: the Postgres of
+   each server (and the synchronised one on the central server): their state, and starting / stopping them, or a new
+   dated database. Each action button has a ">_" button that shows its commands without running them; after an action
+   ran, its commands and their output are shown (and kept in the action log).
+   Depends on editors.js ($, h, api, status) and app.js (cfg, commit, clone). */
+(() => {
+  const S = { data: null, tab: null, busy: {}, log: [], pick: {}, modif: {} };
+  const LABELS = {
+    base: ['Base folder', 'the other paths default to it'], db_pattern: ['Own databases', 'Postgres data folders (<server>_<date>_db)'],
+    psql_sock: ['Own Postgres socket', ''], pg_port: ['Own Postgres port', ''], artifacts: ['Artifacts', 'of the runs made here'],
+    checkpoints: ['Checkpoints', 'of the runs made here'], launcher: ['Launcher folder', 'repo mirror, launches, queue'],
+    scripts: ['Your scripts', 'launch-server.sh, server.sh'], empty_db: ['Empty database', 'copied to make a new dated one'],
+    synchronised: ['Synchronised data', 'central server only'], sync_sock: ['Synchronised Postgres socket', 'central server only'],
+    sync_port: ['Synchronised Postgres port', 'central server only'],
+    db_image: ['Postgres image', 'for the synchronised database (default: the Docker image variable)'],
+  };
+  const DERIVED = [['repo', 'Repo mirror'], ['launches', 'Launch folders'], ['queue', 'Queue'], ['sync_db_pattern', 'Synchronised databases'],
+    ['sync_artifacts', 'Synchronised artifacts'], ['sync_checkpoints', 'Synchronised checkpoints']];
+  const CENTRAL_KEYS = new Set(['synchronised', 'sync_sock', 'sync_port', 'db_image', 'sync_db_pattern', 'sync_artifacts', 'sync_checkpoints']);
+
+  const pill = (cls, text, title) => h('span', { class: 'sv-pill ' + cls, title: title || null }, text);
+  const base = (p) => String(p || '').split('/').pop();
+  const listed = () => S.data?.servers || [];
+
+  async function load() {
+    try { S.data = await api('/api/servers'); } catch (e) { S.data = { servers: [], error: e.message }; }
+    try { S.log = (await api('/api/actions')).actions; } catch (e) { S.log = []; }
+    paint();
+  }
+
+  /* ---------- actions: their commands first (nothing runs), or run them and show what ran ---------- */
+
+  async function showPlan(server, action, args) {
+    try {
+      const r = await api('/api/servers/run', { server, action, args, dry: true });
+      commandsDialog(r.title + ' (not run)', r.plan.map((s) => ({ ...s, planned: true })));
+    } catch (e) { status(e.message, true); }
+  }
+
+  async function run(server, action, args, after) {
+    S.busy[server + action] = true; paint();
+    try {
+      const r = await api('/api/servers/run', { server, action, args });
+      const i = listed().findIndex((x) => x.name === server);
+      if (i >= 0) S.data.servers[i] = r.server;
+      status(`${r.result.title} ${r.result.ok ? 'done' : 'failed'}${after && r.result.ok ? `: ${after}` : ''}`, !r.result.ok,
+        { label: 'Commands and output', fn: () => commandsDialog(r.result.title, r.steps, r.result.id) });
+      if (!r.result.ok || ['db_scripts', 'db_start', 'db_new'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
+    } catch (e) { status(e.message, true); }
+    delete S.busy[server + action];
+    try { S.log = (await api('/api/actions')).actions; } catch (e) { /* keep the old log */ }
+    paint();
+  }
+
+  /* an action button and its ">_" (show the commands) */
+  function actionButton(sv, action, label, opts = {}) {
+    const busy = S.busy[sv.name + action];
+    const args = opts.args || {};
+    return h('span', { class: 'sv-act' },
+      h('button', { type: 'button', class: 'sv-btn' + (opts.primary ? ' primary' : '') + (opts.danger ? ' danger' : ''), disabled: busy || opts.disabled ? '' : null,
+        title: opts.title || null,
+        onclick: (ev) => {
+          const b = ev.currentTarget;
+          if (opts.confirm && !b.dataset.armed) {                  // first click arms it, the second runs it
+            b.dataset.armed = '1'; b.textContent = opts.confirm; b.classList.add('armed');
+            setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = label; b.classList.remove('armed'); } }, 4000);
+            return;
+          }
+          run(sv.name, action, args, opts.after);
+        } }, busy ? '...' : label),
+      h('button', { type: 'button', class: 'sv-cmd-btn', title: `Show the commands of "${label}" (nothing runs)`, 'aria-label': `Commands of ${label} on ${sv.name}`,
+        onclick: () => showPlan(sv.name, action, args) }, '>_'));
+  }
+
+  function commandsDialog(title, steps, id) {
+    let d = $('#svdlg');
+    if (!d) { d = h('dialog', { id: 'svdlg', class: 'wide svdlg', 'aria-labelledby': 'sv-title' }); document.body.append(d); }
+    d.replaceChildren(h('div', { class: 'sv-wrap' },
+      h('div', { class: 'pk-head' }, h('h3', { id: 'sv-title' }, title), h('span', { class: 'sp' }),
+        id ? h('span', { class: 'hint' }, `logged in actions/${id}/commands.log`) : h('span', { class: 'hint' }, 'nothing has run'),
+        h('button', { type: 'button', class: 'ghost', onclick: () => d.close() }, 'Close')),
+      ...steps.map((s, i) => h('div', { class: 'sv-step' + (s.planned ? '' : s.rc === 0 ? ' ok' : ' bad') },
+        h('div', { class: 'sv-step-head' }, h('b', {}, `${i + 1}. ${s.label}`), h('span', { class: 'sp' }),
+          s.planned ? '' : h('span', { class: 'hint' }, `exit ${s.rc} · ${s.secs} s`)),
+        h('pre', { class: 'sv-cmd' }, s.display),
+        !s.planned && (s.out || s.err) ? h('details', { class: 'sv-out', open: '' }, h('summary', {}, 'output'),
+          h('pre', {}, (s.out || '') + (s.err ? `\n[stderr]\n${s.err}` : ''))) : ''))));
+    d.showModal();
+  }
+
+  async function openLog(id) {
+    try {
+      const a = await api('/api/actions/' + encodeURIComponent(id));
+      let d = $('#svdlg');
+      if (!d) { d = h('dialog', { id: 'svdlg', class: 'wide svdlg' }); document.body.append(d); }
+      d.replaceChildren(h('div', { class: 'sv-wrap' },
+        h('div', { class: 'pk-head' }, h('h3', {}, a.title || id), h('span', { class: 'sp' }), h('span', { class: 'hint' }, a.folder + '/commands.log'),
+          h('button', { type: 'button', class: 'ghost', onclick: () => d.close() }, 'Close')),
+        h('pre', { class: 'sv-log' }, a.log)));
+      d.showModal();
+    } catch (e) { status(e.message, true); }
+  }
+
+  /* ---------- Servers tab ---------- */
+
+  function gpuChips(st) {
+    if (!st?.gpus?.length) return h('span', { class: 'hint' }, st ? 'none seen' : '?');
+    return h('span', { class: 'sv-gpus' }, ...st.gpus.map((g) => h('span', { class: 'sv-gpu' + (g.free ? ' free' : ''), title: `GPU ${g.index}: ${Math.round(g.mem_used)} / ${Math.round(g.mem_total)} MiB${g.free ? ', free' : ''}` }, String(g.index))));
+  }
+
+  function pgSummary(state, latest, n) {
+    if (!state) return h('span', { class: 'hint' }, '?');
+    return h('div', { class: 'sv-stack' }, state === 'running' ? pill('ok', 'running') : pill('bad', 'stopped', 'start it in Databases'),
+      latest ? h('code', { class: 'sv-path' }, base(latest)) : h('span', { class: 'hint' }, 'no folder'), n > 1 ? h('span', { class: 'hint' }, `newest of ${n}`) : '');
+  }
+
+  function connCell(sv) {
+    return h('div', { class: 'sv-stack' }, sv.connected ? pill('ok', 'connected') : pill('off', 'not connected'),
+      sv.connected ? actionButton(sv, 'disconnect', 'Disconnect')
+        : actionButton(sv, 'connect', 'Connect', { primary: true, title: 'Open one ssh connection (your agent asks for the key), reused by every command' }));
+  }
+
+  function serverRow(sv) {
+    const st = sv.status;
+    return h('tr', { class: (sv.disabled ? 'sv-disabled' : '') + (sv.central ? ' sv-central' : '') },
+      h('td', {}, h('div', { class: 'sv-stack' }, h('b', {}, sv.name), sv.central ? pill('ref', 'central') : '', sv.disabled ? pill('off', 'commented out') : '',
+        h('small', { class: 'sv-addr' }, `${sv.user ? sv.user + '@' : ''}${sv.host}${sv.port && sv.port !== 22 ? ':' + sv.port : ''}`))),
+      h('td', {}, connCell(sv)),
+      h('td', {}, pgSummary(st?.pg, st?.db_latest, st?.dbs?.length || 0)),
+      h('td', {}, sv.central ? pgSummary(st?.sync_pg, st?.sync_db_latest, st?.sync_dbs?.length || 0) : h('span', { class: 'hint' }, '-')),
+      h('td', {}, gpuChips(st)),
+      h('td', { class: 'num' }, st?.disk_free_gb != null ? `${st.disk_free_gb} GB` : h('span', { class: 'hint' }, '?')),
+      h('td', {}, h('div', { class: 'sv-stack' }, h('span', { class: 'hint' }, st ? st.when : 'never read'),
+        actionButton(sv, 'status', 'Read state', { disabled: !sv.connected, title: sv.connected ? 'Read Postgres, folders, GPUs and disk (read-only)' : 'Connect first' }))));
+  }
+
+  function pathsTable(servers) {
+    const keys = [...Object.keys(LABELS), ...DERIVED.map(([k]) => k)];
+    const label = (k) => LABELS[k] || [DERIVED.find(([x]) => x === k)[1], 'from the launcher / synchronised folder'];
+    return h('table', { class: 'sv-paths' },
+      h('thead', {}, h('tr', {}, h('th', {}), ...servers.map((s) => h('th', {}, s.name, s.central ? ' ★' : '')))),
+      h('tbody', {}, ...keys.map((k) => h('tr', {}, h('th', { scope: 'row' }, label(k)[0], label(k)[1] ? h('small', {}, label(k)[1]) : ''),
+        ...servers.map((s) => {
+          if (CENTRAL_KEYS.has(k) && !s.central) return h('td', {}, h('span', { class: 'hint' }, '-'));
+          const own = (s.paths || {})[k];
+          const v = s.paths_all[k];
+          return h('td', {}, v ? h('code', { class: 'sv-path' + (own ? ' changed' : ''), title: own ? 'changed for this server' : 'default' }, v) : h('span', { class: 'hint' }, k === 'db_image' ? 'Docker image variable' : '-'));
+        })))));
+  }
+
+  function logTable(kind) {
+    const rows = S.log.filter((a) => !kind || (kind === 'db' ? a.kind.startsWith('db_') : true));
+    if (!rows.length) return h('p', { class: 'hint' }, 'No action yet.');
+    return h('table', { class: 'sv-log-table' },
+      h('thead', {}, h('tr', {}, ...['When', 'Action', 'Server', 'Steps', 'Result', ''].map((t) => h('th', {}, t)))),
+      h('tbody', {}, ...rows.slice(0, 40).map((a) => h('tr', {},
+        h('td', { class: 'hint' }, a.when), h('td', {}, a.title), h('td', {}, a.server || '-'), h('td', { class: 'num' }, String(a.steps)),
+        h('td', {}, a.ok ? pill('ok', 'done') : pill('bad', 'failed')),
+        h('td', {}, h('button', { type: 'button', class: 'sv-btn', onclick: () => openLog(a.id) }, 'Commands and output'))))));
+  }
+
+  const NOTE = 'Nothing connects, starts or syncs by itself: Connect opens one ssh connection per server (your agent asks for the key), reused by the commands '
+    + 'after it for 4 hours or until Disconnect. ">_" shows what an action runs, without running it; every action that runs is logged with its commands and output.';
+
+  function paintServers(box) {
+    const servers = listed();
+    box.replaceChildren(
+      h('div', { class: 'rs-head' }, h('h2', {}, 'Servers'),
+        h('span', { class: 'hint' }, S.data.central ? `central server: ${S.data.central} (synchronised data)` : 'no central server yet: choose one in Edit servers'),
+        h('span', { class: 'sp' }),
+        h('button', { type: 'button', class: 'ghost', onclick: editServers }, 'Edit servers'),
+        h('button', { type: 'button', class: 'ghost', onclick: load }, 'Refresh')),
+      h('p', { class: 'hint sv-note' }, NOTE),
+      S.data.error ? h('pre', { class: 'dlg-err' }, S.data.error) : '',
+      h('div', { class: 'card sv-card' }, h('div', { class: 'rs-scroll' }, h('table', { class: 'sv-table' },
+        h('thead', {}, h('tr', {}, ...['Server', 'Connection', 'Own Postgres', 'Synchronised Postgres', 'GPUs', 'Disk free', 'State'].map((t) => h('th', {}, t)))),
+        h('tbody', {}, ...servers.map(serverRow))))),
+      h('details', { class: 'card sv-card', open: '' }, h('summary', {}, h('b', {}, 'Paths on each server'),
+        h('span', { class: 'hint' }, '  defaults from the base folder; a path changed for one server is marked (Edit servers)')),
+        h('div', { class: 'rs-scroll' }, pathsTable(servers))),
+      h('details', { class: 'card sv-card', open: '' }, h('summary', {}, h('b', {}, 'Action log'), h('span', { class: 'hint' }, '  every command run on a server, with its output')),
+        h('div', { class: 'rs-scroll' }, logTable())));
+  }
+
+  /* ---------- Databases tab ---------- */
+
+  function dbSection(sv, which) {
+    const db = sv.db?.[which];
+    const p = sv.paths_all;
+    const key = `${sv.name}/${which}`;
+    const title = which === 'own' ? 'Own database' : 'Synchronised database';
+    const where = which === 'own' ? `${p.psql_sock} · port ${p.pg_port}` : `${p.sync_sock} · port ${p.sync_port}`;
+    if (!db) return h('div', { class: 'db-sec' }, h('div', { class: 'db-head' }, h('b', {}, title), h('code', { class: 'sv-path' }, where)),
+      h('p', { class: 'hint' }, sv.connected ? 'Read the databases to see their state.' : 'Connect, then read the databases.'));
+    const c = db.container;
+    const inUse = db.data_directory || c?.folder || null;
+    const folders = db.folders || [];
+    const pick = S.pick[key] && folders.includes(S.pick[key]) ? S.pick[key] : (inUse && folders.includes(inUse) ? inUse : folders[folders.length - 1]);
+    S.pick[key] = pick;
+    const sizes = sv.db?.sizes || {};
+    const rows = folders.slice().reverse().map((f) => {
+      const radio = h('input', { type: 'radio', name: `db-${key}`, checked: f === pick ? '' : null, 'aria-label': `Use ${base(f)}` });
+      radio.addEventListener('change', () => { S.pick[key] = f; paint(); });
+      const date = (base(f).match(/\d{4}\.\d\d\.\d\d/) || [''])[0];
+      return h('tr', { class: f === inUse ? 'db-inuse' : '' }, h('td', {}, radio), h('td', {}, h('code', {}, base(f))), h('td', { class: 'hint' }, date),
+        h('td', { class: 'num' }, sizes[f] != null ? `${(sizes[f] / 1024).toFixed(1)} GB` : h('span', { class: 'hint' }, '-')),
+        h('td', {}, f === inUse ? pill('ok', 'in use') : ''));
+    });
+    const modif = h('input', { type: 'checkbox', checked: S.modif[key] ? '' : null });
+    modif.addEventListener('change', () => { S.modif[key] = modif.checked; paint(); });
+    const running = db.state === 'running';
+    return h('div', { class: 'db-sec' },
+      h('div', { class: 'db-head' }, h('b', {}, title), running ? pill('ok', 'running') : pill('bad', 'stopped'), h('code', { class: 'sv-path' }, where)),
+      h('dl', { class: 'db-facts' },
+        h('dt', {}, 'Folder in use'), h('dd', {}, inUse ? h('code', { class: 'sv-path', title: db.data_directory ? 'asked to Postgres (show data_directory)' : 'from the container' }, inUse) : h('span', { class: 'hint' }, running ? 'unknown' : 'none (stopped)')),
+        h('dt', {}, 'Container'), h('dd', {}, c ? h('span', {}, h('code', {}, c.id), ` ${c.name} · ${c.image} · started ${c.started}`,
+          which === 'own' ? h('span', { class: 'hint' }, ` · ${c.folder ? 'folder given' : 'newest folder'}${c.allow_modif ? ' · changes allowed in the MLflow UI' : ''}`) : '')
+          : h('span', { class: 'hint' }, 'none of yours running')),
+        ...(which === 'own' && c ? [h('dt', {}, 'MLflow UI'), h('dd', {}, h('code', {}, `${sv.host}:5923`), h('span', { class: 'hint' }, ' (published by your launch-server.sh)'))] : [])),
+      folders.length ? h('div', { class: 'rs-scroll' }, h('table', { class: 'db-folders' },
+        h('thead', {}, h('tr', {}, ...['', 'Folder', 'Date', 'Size', ''].map((t) => h('th', {}, t)))), h('tbody', {}, ...rows)))
+        : h('p', { class: 'hint' }, `no folder matches ${which === 'own' ? p.db_pattern : p.sync_db_pattern}`),
+      h('div', { class: 'db-acts' },
+        actionButton(sv, 'db_start', `Start on ${pick ? base(pick) : '...'}`, { primary: true, disabled: !sv.connected || running || !pick,
+          args: { which, folder: pick, allow_modif: !!S.modif[key] }, after: 'read the databases again to see it',
+          title: running ? 'Already running: stop it first' : which === 'own' ? 'Runs your launch-server.sh with this folder' : 'Runs Postgres for the synchronised database' }),
+        which === 'own' ? h('label', { class: 'db-opt', title: 'launch-server.sh --allow-modif: the MLflow UI can change the database' }, modif, 'allow changes in the MLflow UI') : '',
+        actionButton(sv, 'db_stop', 'Stop', { danger: true, confirm: 'Click again to stop', disabled: !sv.connected || !c, args: { which, container: c?.id }, after: 'read the databases again to see it',
+          title: c ? `docker container stop ${c.id}` : 'no container of yours is running' }),
+        actionButton(sv, 'db_new', 'New dated database', { confirm: 'Click again to create it', disabled: !sv.connected || !sv.db?.empty_db, args: { which },
+          title: sv.db?.empty_db ? `a copy of ${p.empty_db}` : `${p.empty_db} not found` }),
+        actionButton(sv, 'db_sizes', 'Measure sizes', { disabled: !sv.connected || !folders.length, args: { which }, title: 'du on the folders (can take a while)' })));
+  }
+
+  function dbCard(sv) {
+    return h('div', { class: 'card sv-card db-card' + (sv.central ? ' central' : '') },
+      h('div', { class: 'db-top' }, h('b', { class: 'db-name' }, sv.name), sv.central ? pill('ref', 'central') : '',
+        sv.connected ? pill('ok', 'connected') : pill('off', 'not connected'),
+        h('span', { class: 'sp' }), sv.db ? h('span', { class: 'hint' }, `read ${sv.db.when}`) : '',
+        sv.connected ? '' : actionButton(sv, 'connect', 'Connect', { primary: true }),
+        actionButton(sv, 'db_status', 'Read the databases', { disabled: !sv.connected, title: 'Read-only: sockets, containers, folders, the folder in use' }),
+        actionButton(sv, 'db_scripts', 'Show your scripts', { disabled: !sv.connected, title: `cat ${sv.paths_all.scripts}/launch-server.sh and server.sh` })),
+      h('div', { class: 'db-secs' }, dbSection(sv, 'own'), sv.central ? dbSection(sv, 'sync') : ''));
+  }
+
+  function paintDatabases(box) {
+    const servers = listed().filter((s) => !s.disabled);
+    box.replaceChildren(
+      h('div', { class: 'rs-head' }, h('h2', {}, 'Databases'), h('span', { class: 'hint' }, 'the Postgres of each server, and the synchronised one on the central server'),
+        h('span', { class: 'sp' }), h('button', { type: 'button', class: 'ghost', onclick: load }, 'Refresh')),
+      h('p', { class: 'hint sv-note' }, 'Start uses your launch-server.sh for a server\'s own database, with the folder you pick (it also starts its MLflow UI on port 5923); '
+        + 'the synchronised database runs Postgres alone on its own socket and port. Stop is docker container stop, as in your stop.sh. New dated database copies _empty_db. '
+        + 'Nothing is read or started until you click; ">_" shows the commands first.'),
+      ...servers.map(dbCard),
+      h('details', { class: 'card sv-card' }, h('summary', {}, h('b', {}, 'Database actions'), h('span', { class: 'hint' }, '  with their commands and output')),
+        h('div', { class: 'rs-scroll' }, logTable('db'))));
+  }
+
+  function paint() {
+    const box = S.tab && $(`#${S.tab}tab`);
+    if (!box) return;
+    if (!S.data) { box.replaceChildren(h('p', { class: 'empty' }, 'Reading the servers...')); return; }
+    if (S.tab === 'servers') paintServers(box); else paintDatabases(box);
+  }
+
+  /* ---------- editing the list of servers ---------- */
+
+  function editServers() {
+    const all = clone(cfg.servers);
+    let d = $('#sveditdlg');
+    if (!d) { d = h('dialog', { id: 'sveditdlg', class: 'wide svdlg', 'aria-labelledby': 'sve-title' }); document.body.append(d); }
+    const rows = all.filter((s) => 'name' in s);
+    const comments = all.filter((s) => !('name' in s));
+    const err = h('p', { class: 'dlg-err', hidden: '' });
+    const body = h('div', { class: 'sve-list' });
+    const open = new Set();
+    const draw = () => {
+      body.replaceChildren(...rows.map((s, i) => {
+        const inp = (key, ph, w) => {
+          const e = h('input', { type: 'text', value: s[key] ?? '', placeholder: ph, class: 'mono', style: w ? `width:${w}` : null, 'aria-label': `${key} of server ${i + 1}` });
+          e.addEventListener('input', () => { s[key] = key === 'port' ? e.value : e.value.trim(); });
+          return e;
+        };
+        const central = h('input', { type: 'radio', name: 'sve-central', checked: s.central ? '' : null, 'aria-label': `${s.name || 'server'} is the central server` });
+        central.addEventListener('change', () => { rows.forEach((x) => { delete x.central; }); s.central = true; draw(); });
+        const off = h('input', { type: 'checkbox', checked: s.disabled ? '' : null, 'aria-label': `${s.name || 'server'} is commented out` });
+        off.addEventListener('change', () => { if (off.checked) s.disabled = true; else delete s.disabled; });
+        const move = (j) => { const [x] = rows.splice(i, 1); rows.splice(j, 0, x); draw(); };
+        const pathBox = h('div', { class: 'sve-paths', hidden: open.has(s) ? null : '' }, ...Object.keys(LABELS).filter((k) => s.central || !CENTRAL_KEYS.has(k)).map((k) => {
+          const e = h('input', { type: 'text', class: 'mono', value: (s.paths || {})[k] || '', placeholder: '(default)', 'aria-label': `${LABELS[k][0]} of ${s.name}` });
+          e.addEventListener('input', () => { s.paths = { ...(s.paths || {}) }; if (e.value.trim()) s.paths[k] = e.value.trim(); else delete s.paths[k]; });
+          return h('label', {}, h('span', {}, LABELS[k][0], h('small', {}, LABELS[k][1])), e);
+        }));
+        const nPaths = Object.keys(s.paths || {}).length;
+        return h('div', { class: 'sve-row' },
+          h('div', { class: 'sve-main' },
+            h('span', { class: 'sve-move' },
+              h('button', { type: 'button', class: 'sv-btn', disabled: i === 0 ? '' : null, 'aria-label': `Move ${s.name} up`, onclick: () => move(i - 1) }, '↑'),
+              h('button', { type: 'button', class: 'sv-btn', disabled: i === rows.length - 1 ? '' : null, 'aria-label': `Move ${s.name} down`, onclick: () => move(i + 1) }, '↓')),
+            inp('name', 'name', '9em'), inp('host', 'host or address', '14em'), inp('port', '22', '4.5em'), inp('user', 'user', '8em'),
+            h('label', { class: 'sve-flag', title: 'Where the synchronised data lives (one server)' }, central, 'central'),
+            h('label', { class: 'sve-flag', title: 'Kept in the list, never contacted' }, off, 'commented out'),
+            h('button', { type: 'button', class: 'sv-btn', onclick: () => { if (open.has(s)) open.delete(s); else open.add(s); draw(); } }, `Paths${nPaths ? ` (${nPaths} changed)` : ''}`),
+            h('button', { type: 'button', class: 'sv-btn danger', onclick: () => { rows.splice(i, 1); draw(); } }, 'Remove')),
+          pathBox);
+      }));
+    };
+    draw();
+    d.replaceChildren(h('div', { class: 'sv-wrap' },
+      h('div', { class: 'pk-head' }, h('h3', { id: 'sve-title' }, 'Servers'), h('span', { class: 'sp' }),
+        h('button', { type: 'button', class: 'ghost', onclick: () => { rows.push({ name: '', host: '', port: 22, user: '' }); draw(); } }, '+ Server'),
+        h('button', { type: 'button', class: 'primary', onclick: async () => {
+          try {
+            for (const s of rows) {
+              if (!s.name || !s.host) throw new Error('Each server needs a name and a host');
+              s.port = Number(s.port || 22);
+              if (s.paths && !Object.keys(s.paths).length) delete s.paths;
+            }
+            await commit((c) => { c.servers = [...rows, ...comments]; });
+            d.close(); load();
+          } catch (e) { err.textContent = e.message; err.hidden = false; }
+        } }, 'Save'),
+        h('button', { type: 'button', class: 'ghost', onclick: () => d.close() }, 'Close')),
+      h('p', { class: 'hint' }, 'The order here is the order everywhere (and in the GPU view). Paths: leave a field empty to use the default from the base folder.'),
+      err, body));
+    d.showModal();
+  }
+
+  /* ---------- the tabs ---------- */
+
+  $('main').append(h('section', { id: 'serverstab', 'aria-label': 'Servers' }), h('section', { id: 'databasestab', 'aria-label': 'Databases' }));
+  window.XPServers = {
+    show(tab = 'servers') { S.tab = tab; if (!S.data) load(); else paint(); },
+    hide() { S.tab = null; },
+    reload: load,
+  };
+})();

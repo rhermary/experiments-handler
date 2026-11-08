@@ -12,7 +12,7 @@
     const p = new URLSearchParams();
     if (!cfg || !st.xp) return p;
     p.set('xp', st.xp);
-    for (const [bid, opt] of Object.entries(st.blocks)) p.set('b.' + bid, opt);
+    for (const [bid, opt] of Object.entries(st.blocks)) p.set('b.' + bid, Array.isArray(opt) ? JSON.stringify(opt) : opt);
     if (st.loop) p.set('loop', st.loop);
     const tab = window.XPResults?.tab || 'launcher';
     if (tab !== 'launcher') p.set('tab', tab);
@@ -59,12 +59,17 @@
         if (xp !== st.xp) st.blocks = {};
         st.xp = xp;
       }
-      for (const [k, v] of p) if (k.startsWith('b.')) st.blocks[k.slice(2)] = v;
+      for (const [k, v] of p) {
+        if (!k.startsWith('b.')) continue;
+        let val = v;
+        if (v.startsWith('[')) { try { val = JSON.parse(v); } catch (e) { /* a plain option name */ } }
+        st.blocks[k.slice(2)] = val;
+      }
       if (p.has('loop')) st.loop = p.get('loop');
       syncSelection();                         // unknown XPs, blocks or options fall back to the defaults
       draw();
       setPvTab(p.get('pv') === 'script' ? 'script' : 'yaml');
-      const tab = ['results', 'mlflow'].includes(p.get('tab')) ? p.get('tab') : 'launcher';
+      const tab = ['results', 'mlflow', 'servers', 'databases'].includes(p.get('tab')) ? p.get('tab') : 'launcher';
       if (p.get('view')) XPResults.setView(p.get('view'));
       if (tab === 'results' && p.get('rsel') !== XPResults.selection) XPResults.setSelection(p.get('rsel'));
       if (tab === 'mlflow') {

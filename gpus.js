@@ -159,6 +159,12 @@
           const s = parse(l.slice(mark[0].length));
           return s ? { ...s, disabled: true } : { comment: l };          // a commented server, or just a comment
         });
+        const before = Object.fromEntries((cfg.servers || []).filter((s) => s.name).map((s) => [s.name, s]));
+        for (const s of servers) {
+          const old = before[s.name];
+          if (old?.central) s.central = true;
+          if (old?.paths) s.paths = old.paths;
+        }
         await commit((c) => { c.servers = servers; });
         await openServers(true);
       },

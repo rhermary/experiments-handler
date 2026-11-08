@@ -5,7 +5,7 @@ const h = (tag, props = {}, ...kids) => {
   for (const [k, v] of Object.entries(props)) {
     if (k === 'class') e.className = v;
     else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
-    else e.setAttribute(k, v);
+    else if (v !== null && v !== undefined) e.setAttribute(k, v);     // null / undefined: no attribute
   }
   e.append(...kids);
   return e;

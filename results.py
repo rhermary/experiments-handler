@@ -55,6 +55,28 @@ def param_names(cfg, name, value):
 REF = re.compile(r"\$\{?([A-Z_][A-Z0-9_]*)")
 
 
+def config_params(cfg, table):
+    """{param: value} of the config the program gets for a selection (its base config file with the variables
+    applied), flattened as the runs log it: task.cls, task.epochs, task.model.adapter.adapters (a list as it is)."""
+    base, _, _ = preview.load_base(cfg, table)
+    tree, _, _ = preview.apply(base, preview.overrides(cfg, table))
+    out = {}
+
+    def walk(prefix, v):
+        if isinstance(v, dict) and ("class_path" in v or "init_args" in v):
+            if "class_path" in v:
+                out[prefix + ".cls"] = v["class_path"]
+            for k, x in (v.get("init_args") or {}).items():
+                walk(f"{prefix}.{k}", x)
+        elif isinstance(v, dict):
+            for k, x in v.items():
+                walk(f"{prefix}.{k}" if prefix else str(k), x)
+        else:
+            out[prefix] = v
+    walk("", tree if isinstance(tree, dict) else {})
+    return out
+
+
 def signatures(cfg, sel):
     """For each block of the XP: {option name: {param: expected value}} (what distinguishes the options).
 
@@ -70,11 +92,12 @@ def signatures(cfg, sel):
             for k in r["vars"]:
                 owner.setdefault(core.full_name(b, k, prefix), set()).add(b["id"])
     for b in xp["blocks"]:
-        values, raws = {}, {}
+        values, raws, tables = {}, {}, {}
         for r in b["rows"]:
             s = copy.deepcopy(sel)
             s.setdefault("blocks", {})[b["id"]] = r["name"]
             table, _ = core.collect(cfg, s)
+            tables[r["name"]] = table
             keep = [n for n in table if n.startswith(prefix) and not preview.is_subconfig_var(cfg, n)]
             values[r["name"]] = {n: preview.expand(table[n]["value"], table) for n in keep}
             raws[r["name"]] = {n: table[n]["value"] for n in keep}
@@ -94,6 +117,22 @@ def signatures(cfg, sel):
                     continue                                 # reads a variable of another block
                 params.update(param_names(cfg, n, v))
             sig[r["name"]] = params
+        # options that choose another base config file: what differs in the configs they give
+        var = cfg["project"]["config_var"]
+        files = {r["name"]: (tables[r["name"]].get(var) or {}).get("value", "") for r in b["rows"]}
+        if len(set(files.values())) > 1 and var in set().union(*(r["vars"] for r in b["rows"])):
+            try:
+                flat = {name: config_params(cfg, tables[name]) for name in files}
+            except (ValueError, OSError):
+                flat = {}
+            keys = set().union(*flat.values()) if flat else set()
+            for k in sorted(keys):
+                vals = [flat[name].get(k) for name in flat]
+                if len({repr(v) for v in vals}) < 2 or any(isinstance(v, str) and "$" in v for v in vals):
+                    continue                                 # the same everywhere, or changes with the loop
+                for name in flat:
+                    if k not in sig[name] and flat[name].get(k) is not None:
+                        sig[name][k] = flat[name][k]
         out[b["id"]] = sig
     return out
 
@@ -177,18 +216,102 @@ def _leaves(v):
         yield str(v)
 
 
-def rule_of(expected, prefix=""):
+def rule_of(expected, prefix="", others=()):
     """MLflow filter for what an option sets: params.K = 'v' (lists and objects: LIKE their values in order);
-    `prefix` "ckpt.": the same, tested on a linked run (ckpt.params.K = 'v')."""
+    `prefix` "ckpt.": the same, tested on a linked run (ckpt.params.K = 'v'). `others`: what the other options of
+    the block set: a null that they set to values means "anything else" (a null seed is replaced by a random one)."""
     conds = []
     for k, v in expected.items():
         key = f"{prefix}params.{k}"
+        if v is None:
+            taken = sorted({_literal(o[k]) for o in others if o.get(k) is not None and not isinstance(o[k], (dict, list, tuple))})
+            if taken:
+                conds.append(f"{key} NOT IN (" + ", ".join("'" + t.replace("'", "\\'") + "'" for t in taken) + ")")
+                continue
         if isinstance(v, (dict, list, tuple)):
-            parts = [p.replace("'", "") for p in _leaves(v)]
-            conds.append(f"{key} LIKE '%{'%'.join(parts)}%'" if parts else f"{key} = '{_literal(v)}'")
+            # objects: the classes in their order, then each 'key': value pair anywhere (MLflow logs the str() of the
+            # value, whose key order may differ from the option's); plain lists: their values in order
+            classes = [str(c) for _, c in _pairs(v) if _ == "class_path"]
+            pairs = [(a, b) for a, b in _pairs(v) if a is not None and a not in ("class_path", "init_args")]
+            if classes or pairs:
+                if classes:
+                    conds.append(f"{key} LIKE '%{'%'.join(c.replace(chr(39), '') for c in classes)}%'")
+                for a, b in pairs:
+                    text = f"'{a}': {b!r}".replace("\\", "\\\\").replace('"', '\\"')
+                    conds.append(f'{key} LIKE "%{text}%"')
+            else:
+                parts = [p.replace("'", "") for p in _leaves(v)]
+                conds.append(f"{key} LIKE '%{'%'.join(parts)}%'" if parts else f"{key} = '{_literal(v)}'")
         else:
             conds.append(f"{key} = '{_literal(v).replace(chr(39), chr(92) + chr(39))}'")
     return " and ".join(conds)
+
+
+def _pairs(v, key=None):
+    """(key, scalar) of every leaf of nested dicts and lists (key None for list items that are scalars)."""
+    if isinstance(v, dict):
+        for k, x in v.items():
+            if isinstance(x, (dict, list, tuple)):
+                yield from _pairs(x, k)
+            else:
+                yield str(k), x
+    elif isinstance(v, (list, tuple)):
+        for x in v:
+            if isinstance(x, (dict, list, tuple)):
+                yield from _pairs(x, key)
+            else:
+                yield None, x
+
+
+def _rule_rank(v):
+    """Order of the values of a dimension (the first rule a run matches wins): an option that sets nothing matches
+    anything, and one that sets a null (= 'None', NOT IN) matches runs that logged nothing or anything else: after
+    the others."""
+    return (v["rule"] == "", "= 'None'" in v["rule"] or " NOT IN (" in v["rule"])
+
+
+def _quote(text):
+    return '"' + str(text).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _logged(expected, prefix=""):
+    """The parameters an option gives, as a run logs them (str() of the value)."""
+    return {f"{prefix}params.{k}": (str(v) if isinstance(v, (dict, list, tuple)) else _literal(v))
+            for k, v in expected.items() if v is not None}
+
+
+def _exclusive(values, expected, prefix=""):
+    """When the rule of an option also matches what another option logs (Conv1D matches Conv1D > Perceiver), it
+    would take that option's runs: add the negation of a condition of the other's rule that the option itself fails
+    (adapters NOT LIKE '%Conv1D%Perceiver%'). `expected`: {label: what the option sets}."""
+    neg = {"LIKE": "NOT LIKE", "=": "!=", "IN": "NOT IN"}
+    parsed = {}
+    for v in values:
+        try:
+            parsed[v["label"]] = T.parse_rule(v["rule"])
+        except ValueError:
+            parsed[v["label"]] = None
+    logged = {v["label"]: _logged(expected.get(v["label"]) or {}, prefix) for v in values}
+    for v in values:
+        mine = parsed[v["label"]]
+        if not mine:
+            continue
+        extra = []
+        for w in values:
+            other = parsed[w["label"]]
+            if w is v or not other or not T.matches(logged[w["label"]], mine) or not T.matches(logged[w["label"]], other):
+                continue                                     # this rule does not take the other's runs
+            cond = next((c for c in other if c[1] in neg and not T.matches(logged[v["label"]], [c])), None)
+            if cond is None:
+                continue
+            col, op, want = cond
+            if op == "IN":
+                extra.append(f"{col} NOT IN (" + ", ".join(_quote(x) for x in want) + ")")
+            else:
+                extra.append(f"{col} {neg[op]} {_quote(want)}")
+        if extra:
+            v["rule"] = " and ".join([v["rule"], *extra])
+    return values
 
 
 def _rule_columns(rule):
@@ -207,8 +330,10 @@ def auto_dimensions(cfg, sel, links=(), id_cols=(), df=None):
     sigs = signatures(cfg, sel)
     out, names = [], set()
     for b in xp["blocks"]:
-        values = [{"label": r["name"], "rule": rule_of(sigs[b["id"]][r["name"]])} for r in b["rows"]]
-        values.sort(key=lambda v: v["rule"] == "")            # an option that sets nothing: last (matches anything)
+        rows = [r for r in b["rows"] if not r.get("loop_all")]   # "all (N)" of a list: not a value a run can have
+        values = _exclusive([{"label": r["name"], "rule": rule_of(sigs[b["id"]][r["name"]], others=[sigs[b["id"]][o["name"]] for o in rows if o is not r])}
+                             for r in rows], sigs[b["id"]])
+        values.sort(key=_rule_rank)                           # broad rules last: the first match wins
         cols = set().union(*(_rule_columns(v["rule"]) for v in values)) if values else set()
         if links and cols and cols <= set(id_cols):
             continue                                          # e.g. the checkpoint path: replaced by the link
@@ -232,10 +357,12 @@ def auto_dimensions(cfg, sel, links=(), id_cols=(), df=None):
             for b in maker["blocks"]:
                 if len(b["rows"]) < 2:
                     continue
-                values = [{"label": r["name"], "rule": rule_of(msigs[b["id"]][r["name"]], prefix=f"{n}.")} for r in b["rows"]]
+                values = _exclusive([{"label": r["name"], "rule": rule_of(msigs[b["id"]][r["name"]], prefix=f"{n}.",
+                                                                  others=[msigs[b["id"]][o["name"]] for o in b["rows"] if o is not r])} for r in b["rows"]],
+                                    msigs[b["id"]], prefix=f"{n}.")
                 if not any(v["rule"] for v in values):
                     continue
-                values.sort(key=lambda v: v["rule"] == "")
+                values.sort(key=_rule_rank)
                 name = f"{b['label']} ({n})"
                 if name not in names:
                     out.append({"name": name, "values": values})

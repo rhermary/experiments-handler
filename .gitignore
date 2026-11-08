@@ -7,3 +7,6 @@ template.sh
 userlist.csv
 .gpu-servers.json
 .mlflow-server.log
+.queue.json*
+actions.log
+actions/
