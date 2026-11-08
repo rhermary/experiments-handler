@@ -23,10 +23,11 @@ A small web app to build, launch and analyse the experiments of a Python researc
   when you click Connect, their state (Postgres, GPUs, disk), and the Postgres database of each server (start on a
   dated folder, stop, new dated database). Every action shows its commands before running them, and is logged with
   its output. Nothing connects or starts by itself.
-- **Sync**: the runs of each server's database, with their artifacts and checkpoints, copied into the synchronised
-  database of the central server, when you click. A preview (read-only) shows per experiment the new runs, the runs
-  changed since their last sync, and the size of the files; the sync copies the files (tar | tar through this machine),
-  then the rows (one transaction), and checks both. Experiments are matched by name (their ids differ between
+- **Sync**: the runs of each server's database copied into the synchronised database of the central server, when you
+  click, in two separate syncs. A preview (read-only) shows per experiment the new runs, the runs changed since their
+  last sync, the checkpoints missing on the central server, and their sizes. *Results*: the artifacts (tar | tar
+  through this machine), then the rows (one transaction), then both are checked. *Checkpoints*: the checkpoint folders
+  of the runs already synchronised, then checked. Experiments are matched by name (their ids differ between
   databases); runs on older artifact paths are left alone; nothing is deleted.
 - **MLflow** UI in a tab, and the **GPU** usage of your servers (ssh).
 

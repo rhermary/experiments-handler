@@ -486,7 +486,7 @@ _STATUS = {}                                                 # server name -> it
 def _server_view(sv, cfg=None):
     return {**sv, "paths_all": core.server_paths(sv), "connected": remote.connected(sv), "status": _STATUS.get(sv["name"]),
             "db": _DB.get(sv["name"]), "image_default": _image(cfg or core.load(), sv),
-            "sync": sync.light(sync.PLANS.get(sv["name"])), "synced": _SYNCED.get(sv["name"])}
+            "sync": sync.light(sync.PLANS.get(sv["name"])), "synced": {k: _SYNCED[sv["name"], k] for k in ("results", "checkpoints") if (sv["name"], k) in _SYNCED}}
 
 
 @app.get("/api/servers")
@@ -521,9 +521,10 @@ SERVER_ACTIONS = {
     "db_sizes": ("measure the database folders", lambda cfg, sv, a: remote.db_sizes_steps(sv, a.get("which", "own"))),
     "db_scripts": ("show the database scripts", lambda cfg, sv, a: remote.db_scripts_steps(sv)),
     "sync_preview": ("preview the sync to the central server", lambda cfg, sv, a: sync.preview_steps(sv, core.central_server(cfg))),
-    "sync_run": ("sync to the central server", lambda cfg, sv, a: sync.sync_steps(sv, core.central_server(cfg), a.get("experiments") or [])),
+    "sync_run": ("sync the results to the central server", lambda cfg, sv, a: sync.sync_steps(sv, core.central_server(cfg), a.get("experiments") or [])),
+    "sync_ckpt": ("sync the checkpoints to the central server", lambda cfg, sv, a: sync.ckpt_steps(sv, core.central_server(cfg), a.get("experiments") or [])),
 }
-_SYNCED = {}                                                 # server name -> the last sync: {when, id, ok, out}
+_SYNCED = {}                                                 # (server name, results|checkpoints) -> the last sync: {when, id, ok, out}
 
 
 @app.post("/api/servers/run")
@@ -559,9 +560,14 @@ def api_servers_run():
         _DB.setdefault(sv["name"], {}).setdefault("sizes", {}).update(sizes)
     if body["action"] == "sync_run":
         rows = next((s["out"] for s in res["steps"] if s["label"].startswith("copy the rows")), "")
-        _SYNCED[sv["name"]] = {"when": res["when"], "id": res["id"], "ok": res["ok"], "out": rows}
+        _SYNCED[sv["name"], "results"] = {"when": res["when"], "id": res["id"], "ok": res["ok"], "out": rows}
         if res["ok"]:
             sync.PLANS.pop(sv["name"], None)                 # what it said is done: preview again to see what is left
+    if body["action"] == "sync_ckpt":
+        out = next((s["out"] for s in res["steps"] if s["label"].startswith("check the checkpoints")), "")
+        _SYNCED[sv["name"], "checkpoints"] = {"when": res["when"], "id": res["id"], "ok": res["ok"], "out": out}
+        if res["ok"]:
+            sync.ckpt_done(sv["name"], (body.get("args") or {}).get("experiments"))
     if body["action"] == "disconnect":
         _STATUS.pop(sv["name"], None)
         _DB.pop(sv["name"], None)

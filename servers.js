@@ -5,7 +5,7 @@
    ran, its commands and their output are shown (and kept in the action log).
    Depends on editors.js ($, h, api, status) and app.js (cfg, commit, clone). */
 (() => {
-  const S = { data: null, tab: null, busy: {}, log: [], pick: {}, modif: {}, image: {}, other: {}, syncSel: {} };
+  const S = { data: null, tab: null, busy: {}, log: [], pick: {}, modif: {}, image: {}, other: {}, syncSel: {}, ckptSel: {} };
   const LABELS = {
     base: ['Base folder', 'the other paths default to it'], db_pattern: ['Own databases', 'Postgres data folders (<server>_<date>_db)'],
     psql_sock: ['Own Postgres socket', ''], pg_port: ['Own Postgres port', ''], artifacts: ['Artifacts', 'of the runs made here'],
@@ -51,7 +51,7 @@
       if (quiet) { delete S.busy[server + action]; return r.result.ok; }
       status(`${r.result.title} ${r.result.ok ? 'done' : 'failed'}${after && r.result.ok ? `: ${after}` : ''}`, !r.result.ok,
         { label: 'Commands and output', fn: () => commandsDialog(r.result.title, r.steps, r.result.id) });
-      if (!r.result.ok || ['db_scripts', 'db_start', 'db_new', 'sync_run'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
+      if (!r.result.ok || ['db_scripts', 'db_start', 'db_new', 'sync_run', 'sync_ckpt'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
     } catch (e) {
       if (quiet) { delete S.busy[server + action]; return false; }
       status(e.message, true);
@@ -413,43 +413,62 @@
       h('span', { class: 'sp' }),
       actionButton(sv, 'sync_preview', pv ? 'Preview again' : 'Preview', { disabled: !!notReady, title: notReady || 'Read-only: what a sync would copy (runs, files, sizes)' }));
     const parts = [head];
-    if (sv.synced) {
-      parts.push(h('p', { class: sv.synced.ok ? 'hint' : 'db-warn' }, `Last sync ${sv.synced.when}: ${sv.synced.ok ? 'done and checked' : 'failed (nothing of the failed step was kept)'}. `,
-        h('button', { type: 'button', class: 'db-reset', onclick: () => openLog(sv.synced.id) }, 'commands and output'),
-        sv.synced.out ? h('pre', { class: 'sync-out' }, sv.synced.out.trim()) : ''));
+    for (const [k, label] of [['results', 'results'], ['checkpoints', 'checkpoints']]) {
+      const done = sv.synced?.[k];
+      if (!done) continue;
+      parts.push(h('div', { class: done.ok ? 'sync-last' : 'db-warn' }, h('span', {}, `Last ${label} sync ${done.when}: ${done.ok ? 'done and checked' : 'failed (run it again: nothing of a failed row copy is kept)'}. `),
+        h('button', { type: 'button', class: 'db-reset', onclick: () => openLog(done.id) }, 'commands and output'),
+        done.out ? h('pre', { class: 'sync-out' }, done.out.trim()) : ''));
     }
     if (!pv) {
       parts.push(h('p', { class: 'hint' }, notReady ? `To preview: ${notReady}.` : 'Preview to see what a sync would copy. Nothing is copied before you click Sync.'));
       return h('div', { class: 'card sv-card db-card' }, ...parts);
     }
-    const sel = S.syncSel[sv.name] ??= new Set(pv.experiments.filter((x) => x.new + x.changed).map((x) => x.name));
-    const todo = pv.experiments.filter((x) => sel.has(x.name) && x.new + x.changed);
-    const tot = (k, list = pv.experiments) => list.reduce((a, x) => a + x[k], 0);
+    const ex = pv.experiments;
+    const sel = S.syncSel[sv.name] ??= new Set(ex.filter((x) => x.new + x.changed).map((x) => x.name));
+    const csel = S.ckptSel[sv.name] ??= new Set(ex.filter((x) => x.ckpt).map((x) => x.name));
+    const todo = ex.filter((x) => sel.has(x.name) && x.new + x.changed);
+    const ctodo = ex.filter((x) => csel.has(x.name) && x.ckpt);
+    const tot = (k, list = ex) => list.reduce((a, x) => a + x[k], 0);
+    const box = (set, x, can, what) => {
+      const cb = h('input', { type: 'checkbox', checked: can && set.has(x.name) ? '' : null, disabled: can ? null : '', 'aria-label': `Sync the ${what} of ${x.name}` });
+      cb.addEventListener('change', () => { if (cb.checked) set.add(x.name); else set.delete(x.name); paint(); });
+      return h('td', { class: 'sync-cb' }, cb);
+    };
+    const n = (v, cls) => h('td', { class: 'num' + (v ? (cls ? ' ' + cls : '') : ' hint') }, String(v || 0));
     const row = (x) => {
       const can = x.new + x.changed > 0;
-      const cb = h('input', { type: 'checkbox', checked: can && sel.has(x.name) ? '' : null, disabled: can ? null : '', 'aria-label': `Sync ${x.name}` });
-      cb.addEventListener('change', () => { if (cb.checked) sel.add(x.name); else sel.delete(x.name); paint(); });
-      const n = (v, cls) => h('td', { class: 'num' + (v ? (cls ? ' ' + cls : '') : ' hint') }, String(v || 0));
-      return h('tr', { class: can ? '' : 'sync-done' }, h('td', {}, cb), h('td', {}, x.name, x.deleted ? h('span', { class: 'hint' }, ' (deleted)') : ''),
-        n(x.new, 'sync-new'), n(x.changed, 'sync-chg'), n(x.synced), h('td', { class: 'num' + (x.old_path ? '' : ' hint'), title: x.old_example ? `left alone, e.g. ${x.old_example}` : null }, String(x.old_path || 0)),
-        h('td', { class: 'num' }, can ? `${x.files} · ${gb(x.bytes)}` : ''),
-        h('td', { class: 'hint' }, x.dst_id ? `id ${x.src_id} → ${x.dst_id}` : `id ${x.src_id} → created`));
+      return h('tr', {},
+        h('td', {}, x.name, x.deleted ? h('span', { class: 'hint' }, ' (deleted)') : '', h('div', { class: 'hint' }, x.dst_id ? `id ${x.src_id} → ${x.dst_id}` : `id ${x.src_id} → created`)),
+        box(sel, x, can, 'results'), n(x.new, 'sync-new'), n(x.changed, 'sync-chg'), n(x.synced),
+        h('td', { class: 'num' + (x.old_path ? '' : ' hint'), title: x.old_example ? `left alone, e.g. ${x.old_example}` : null }, String(x.old_path || 0)),
+        h('td', { class: 'num' + (can ? '' : ' hint') }, can ? `${x.files} · ${gb(x.bytes)}` : '-'),
+        box(csel, x, x.ckpt > 0, 'checkpoints'), h('td', { class: 'num' + (x.ckpt ? ' sync-new' : ' hint') }, x.ckpt ? `${x.ckpt} · ${gb(x.ckpt_bytes)}` : '0'),
+        n(x.ckpt_wait), n(x.ckpt_done));
     };
+    const nRes = tot('new', todo) + tot('changed', todo);
     parts.push(
       h('p', { class: 'hint' }, `Preview of ${pv.when}: into ${pv.dst_folder} on ${pv.central} (files under ${pv.dst_artifacts.replace(/\/artifacts$/, '')}/{artifacts,checkpoints}). MLflow schema ${pv.schema}.`),
       ...(pv.blocking || []).map((b) => h('p', { class: 'db-warn' }, b)),
       h('div', { class: 'rs-scroll' }, h('table', { class: 'db-folders sync-table' },
-        h('thead', {}, h('tr', {}, ...['', 'Experiment', 'New', 'Changed', 'Already synced', 'Older paths', 'Files to copy', 'Experiment id'].map((t) => h('th', {}, t)))),
-        h('tbody', {}, ...pv.experiments.map(row)),
-        h('tfoot', {}, h('tr', {}, h('td', {}), h('td', {}, h('b', {}, 'Selected')), h('td', { class: 'num' }, String(tot('new', todo))), h('td', { class: 'num' }, String(tot('changed', todo))),
-          h('td', {}), h('td', {}), h('td', { class: 'num' }, `${tot('files', todo)} · ${gb(tot('bytes', todo))}`), h('td', {}))))),
+        h('thead', {},
+          h('tr', {}, h('th', {}), h('th', { colspan: 6, class: 'sync-group' }, 'Results: runs and artifacts'), h('th', { colspan: 4, class: 'sync-group' }, 'Checkpoints')),
+          h('tr', {}, ...['Experiment', '', 'New', 'Changed', 'Synced', 'Older paths', 'Artifacts', '', 'To copy', 'Waiting', 'There'].map((t) => h('th', {}, t)))),
+        h('tbody', {}, ...ex.map(row)),
+        h('tfoot', {}, h('tr', {}, h('td', {}, h('b', {}, 'Selected')), h('td', {}), h('td', { class: 'num' }, String(tot('new', todo))), h('td', { class: 'num' }, String(tot('changed', todo))),
+          h('td', {}), h('td', {}), h('td', { class: 'num' }, `${tot('files', todo)} · ${gb(tot('bytes', todo))}`),
+          h('td', {}), h('td', { class: 'num' }, `${tot('ckpt', ctodo)} · ${gb(tot('ckpt_bytes', ctodo))}`), h('td', {}), h('td', {}))))),
       Object.keys(pv.not_copied || {}).length ? h('p', { class: 'hint' }, 'Not copied (not used by this project): ' + Object.entries(pv.not_copied).map(([k, v]) => `${v} ${k}`).join(', ')) : '',
-      h('p', { class: 'hint' }, '"Changed": already synced, but its status, end time, params, tags, last metrics or datasets changed since: it is copied again. '
-        + '"Older paths": runs whose artifacts are not under ' + pv.src_artifacts + ': left alone.'),
+      h('p', { class: 'hint' }, '"Changed": already synced, but its status, end time, params, tags, last metrics or datasets changed since: copied again. '
+        + `"Older paths": artifacts not under ${pv.src_artifacts}: left alone. Checkpoints "Waiting": their run is not synchronised yet (sync its results first); `
+        + '"There": already on the central server, identical.'),
       h('div', { class: 'db-acts' },
-        actionButton(sv, 'sync_run', todo.length ? `Sync ${tot('new', todo) + tot('changed', todo)} run${tot('new', todo) + tot('changed', todo) > 1 ? 's' : ''} (${gb(tot('bytes', todo))})` : 'Sync', {
-          primary: true, confirm: 'Click again to sync', disabled: !!notReady || !todo.length || (pv.blocking || []).length > 0,
-          args: { experiments: todo.map((x) => x.name) }, title: notReady || 'Copies the files, then the rows (one transaction), then checks both' })));
+        actionButton(sv, 'sync_run', todo.length ? `Sync results: ${nRes} run${nRes > 1 ? 's' : ''} (${gb(tot('bytes', todo))})` : 'Sync results', {
+          primary: true, confirm: 'Click again to sync the results', disabled: !!notReady || !todo.length || (pv.blocking || []).length > 0,
+          args: { experiments: todo.map((x) => x.name) }, title: notReady || 'The artifacts, then the rows (one transaction), then checks both' }),
+        actionButton(sv, 'sync_ckpt', ctodo.length ? `Sync checkpoints: ${tot('ckpt', ctodo)} run${tot('ckpt', ctodo) > 1 ? 's' : ''} (${gb(tot('ckpt_bytes', ctodo))})` : 'Sync checkpoints', {
+          primary: true, confirm: 'Click again to sync the checkpoints', disabled: !sv.connected || !ctodo.length,
+          args: { experiments: ctodo.map((x) => x.name) }, title: 'The checkpoint folders (tar | tar), then checks them; no database is touched' })));
     return h('div', { class: 'card sv-card db-card' }, ...parts);
   }
 
@@ -466,9 +485,9 @@
         h('b', {}, `Into ${central.name}`), cdb ? pgPill(cdb.state) : h('span', { class: 'hint' }, '? (read the databases)'),
         h('code', { class: 'sv-path' }, cdb?.data_directory || cdb?.container?.folder || central.paths_all.sync_db_pattern),
         h('span', { class: 'hint' }, `files: ${central.paths_all.sync_artifacts}, ${central.paths_all.sync_checkpoints}`)) : '',
-      h('p', { class: 'hint sv-note' }, 'Everything goes through this machine over your ssh connections: the two Postgres sockets are tunnelled here (ssh -O forward), '
-        + 'the rows are copied in one transaction, the run folders go through tar | tar. Files first, then rows, then both are checked; '
-        + 'a sync that fails keeps no rows (run it again). Nothing is deleted anywhere. ">_" shows every command.'),
+      h('p', { class: 'hint sv-note' }, 'Two syncs, each when you click. Results: the runs (rows, through the two Postgres sockets tunnelled here with ssh -O forward) '
+        + 'and their artifacts; the artifacts first, then the rows in one transaction, then both are checked: a failed sync keeps no rows. '
+        + 'Checkpoints: the checkpoint folders of the runs already synchronised (tar | tar through this machine), then checked. Nothing is deleted anywhere. ">_" shows every command.'),
       ...servers.map((sv) => syncCard(sv, central)),
       h('details', { class: 'card sv-card' }, h('summary', {}, h('b', {}, 'Sync actions'), h('span', { class: 'hint' }, '  with their commands and output')),
         h('div', { class: 'rs-scroll' }, logTable('sync'))));

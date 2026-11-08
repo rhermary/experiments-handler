@@ -1,6 +1,8 @@
 """Sync the runs of a server's own database into the synchronised database of the central server, with their
 artifacts and checkpoints. Nothing happens by itself: a preview (read-only) says what would be copied, then the sync
-copies what you chose and checks it.
+copies what you chose and checks it. Two separate syncs:
+- results: the rows of the runs and their artifacts (config, figures, MLmodel: small);
+- checkpoints: the checkpoint folders (large), of the runs already in the synchronised database.
 
 The servers cannot reach each other: everything goes through this machine, over the ssh connections you opened.
 - Databases: each Postgres socket is forwarded here (ssh -O forward -L <local socket>:<remote socket>, on the open
@@ -130,7 +132,7 @@ def compute(src, dst, sp, dp):
         e = sx.get(str(r["experiment_id"]), {})
         name = e.get("name", f"? (id {r['experiment_id']})")
         x = exps.setdefault(name, {"name": name, "src_id": str(r["experiment_id"]), "dst_id": str(dx[name]["experiment_id"]) if name in dx else None,
-                                   "deleted": e.get("lifecycle_stage") == "deleted", "new": [], "changed": [], "synced": 0, "old_path": [], "bytes": 0, "files": 0})
+                                   "deleted": e.get("lifecycle_stage") == "deleted", "new": [], "changed": [], "synced": 0, "synced_runs": [], "old_path": [], "bytes": 0, "files": 0})
         uri = _local(r["artifact_uri"])
         rid = r["run_uuid"]
         if not uri.startswith(root + f"{r['experiment_id']}/{rid}/"):
@@ -144,6 +146,7 @@ def compute(src, dst, sp, dp):
             x["changed"].append(rid)
         else:
             x["synced"] += 1
+            x["synced_runs"].append(rid)
     extra = {}
     for table, col in (("logged_models", "source_run_id"), ("trace_info", None)):
         if _has(src, table) and col:
@@ -195,30 +198,48 @@ def preview_steps(src_sv, dst_sv):
         with connect(src_sv, "own") as src, connect(dst_sv, "sync") as dst:
             plan = compute(src, dst, sp, dp)
             dst_dir = _q(dst, "SHOW data_directory")[0][0]
-        items = [(k, f"{x['src_id']}/{r}") for x in plan["experiments"] for r in x["new"] + x["changed"] for k in ("a", "c")]
+        ex = plan["experiments"]
+        # results: the artifact folders of the runs to copy; checkpoints: every run's folder, here and (runs already
+        # synchronised) on the central server
+        items = [("a", f"{x['src_id']}/{r}") for x in ex for r in x["new"] + x["changed"]]
+        items += [("c", f"{x['src_id']}/{r}") for x in ex for r in x["new"] + x["changed"] + x["synced_runs"]]
         sizes, _ = _sizes(src_sv, sp["artifacts"], sp["checkpoints"], items)
-        for x in plan["experiments"]:
-            x["folders"] = {}
+        there = [("c", f"{x['dst_id']}/{r}") for x in ex if x["dst_id"] for r in x["changed"] + x["synced_runs"]]
+        sizes_c, _ = _sizes(dst_sv, dp["sync_artifacts"], dp["sync_checkpoints"], there)
+        for x in ex:
+            x["folders"], x["ckpt"], x["ckpt_wait"], x["ckpt_done"] = {}, {}, 0, 0
             for r in x["new"] + x["changed"]:
-                for k in ("a", "c"):
-                    v = sizes.get((k, f"{x['src_id']}/{r}"))
-                    if v:
-                        x["folders"].setdefault(r, {})[k] = v
-                        x["files"] += v[0]
-                        x["bytes"] += v[1]
+                v = sizes.get(("a", f"{x['src_id']}/{r}"))
+                if v:
+                    x["folders"][r] = {"a": v}
+                    x["files"] += v[0]
+                    x["bytes"] += v[1]
+            for r in x["new"] + x["changed"] + x["synced_runs"]:
+                v = sizes.get(("c", f"{x['src_id']}/{r}"))
+                if not v:
+                    continue
+                if r in x["new"]:
+                    x["ckpt_wait"] += 1                    # its run is not in the synchronised database yet
+                elif sizes_c.get(("c", f"{x['dst_id']}/{r}")) == v:
+                    x["ckpt_done"] += 1
+                else:
+                    x["ckpt"][r] = v
         plan.update(source=src_sv["name"], central=dst_sv["name"], dst_folder=dst_dir, when=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         PLANS[src_sv["name"]] = plan
         lines = [f"synchronised database: {dst_dir}", f"MLflow schema: {plan['schema']} / {plan['schema_dst']}", *plan["blocking"]]
         for x in plan["experiments"]:
-            lines.append(f"{x['name']}: {len(x['new'])} new, {len(x['changed'])} changed, {x['synced']} already synced, "
-                         f"{len(x['old_path'])} on older paths (left alone); {x['files']} files, {x['bytes'] / 1e9:.2f} GB"
-                         + ("" if x["dst_id"] else " (experiment created in the synchronised database)"))
+            lines.append(f"{x['name']}: results: {len(x['new'])} new, {len(x['changed'])} changed, {x['synced']} already synced, "
+                         f"{len(x['old_path'])} on older paths (left alone), artifacts {x['files']} files {x['bytes'] / 1e9:.2f} GB"
+                         + ("" if x["dst_id"] else " (experiment created in the synchronised database)")
+                         + f"; checkpoints: {len(x['ckpt'])} to copy ({sum(v[1] for v in x['ckpt'].values()) / 1e9:.2f} GB), "
+                         f"{x['ckpt_wait']} waiting for their results, {x['ckpt_done']} already there")
         return "\n".join(lines) + "\n"
 
     shown = ("read-only, through the two tunnels:\n"
              f"  {s_what}: experiments, runs (id, experiment, status, end time, artifact uri), and per run a digest of its params, tags and last metrics\n"
              f"  {d_what}: the same, for the runs found in both\n"
-             f"then on {src_sv['name']}, for each run to copy, the files and bytes of {sp['artifacts']}/<experiment id>/<run> and {sp['checkpoints']}/<experiment id>/<run>:\n"
+             f"then on {src_sv['name']}, the files and bytes of {sp['artifacts']}/<experiment id>/<run> (runs to copy) and {sp['checkpoints']}/<experiment id>/<run> (all runs),\n"
+             f"and on {dst_sv['name']}, of {dp['sync_checkpoints']}/<experiment id>/<run> (runs already synchronised):\n"
              + shlex.join(remote.ssh_argv(src_sv, "bash -c <script>")) + "  # script:\n" + SIZE_SCRIPT)
     return [*tunnel_steps(src_sv, "own", s_what), *tunnel_steps(dst_sv, "sync", d_what),
             actions.step("read both databases and measure the run folders (read-only)", fn=read, display=shown, timeout=1800),
@@ -262,6 +283,62 @@ def _rebase(path, old, new):
     return new + p[len(old):] if old and p.startswith(old) else path
 
 
+def _files_cmd(src_sv, dst_sv, kind, src_id, d_id, runs):
+    """Copy of run folders of one experiment and one kind (a: artifacts, c: checkpoints), renamed under the experiment
+    id of the synchronised database: (bash pipeline, its stdin: the folders)."""
+    sp, dp = core.server_paths(src_sv), core.server_paths(dst_sv)
+    s_root, d_root = (sp["artifacts"], dp["sync_artifacts"]) if kind == "a" else (sp["checkpoints"], dp["sync_checkpoints"])
+    q = shlex.quote
+    unpack = f"mkdir -p {q(d_root)} && tar -C {q(d_root)} -xf - --transform=s,^{src_id}/,{d_id}/,"
+    pack = f"tar -C {q(s_root)} -cf - -T -"
+    ssh = lambda sv: shlex.join(remote.ssh_argv(sv))     # noqa: E731  (the remote commands below: paths and tar only)
+    if src_sv["name"] == dst_sv["name"]:
+        cmd = f'{ssh(src_sv)} "{pack} | {unpack}"'
+    else:
+        cmd = f'{ssh(src_sv)} "{pack}" | {ssh(dst_sv)} "{unpack}"'
+    return "set -o pipefail; " + cmd, "".join(f"{src_id}/{r}\n" for r in runs)
+
+
+def _copy_step(src_sv, dst_sv, kind, name, src_id, get_id, get_runs, n, size):
+    """A step copying run folders (get_id, get_runs: resolved when it runs: the experiment id may be created by then)."""
+    what = "artifacts" if kind == "a" else "checkpoints"
+
+    def go():
+        runs = get_runs()
+        if not runs:
+            return f"no {what} folder to copy\n"
+        cmd, stdin = _files_cmd(src_sv, dst_sv, kind, src_id, get_id(), runs)
+        r = subprocess.run(["bash", "-c", cmd], input=stdin, capture_output=True, text=True, timeout=24 * 3600, check=False)
+        if r.returncode:
+            raise RuntimeError(f"copy failed (exit {r.returncode}): {r.stderr.strip()}")
+        return f"$ {cmd} <<'EOF'\n{stdin}EOF\n{r.stdout}{r.stderr}copied {len(runs)} folder(s)\n"
+    runs = get_runs()
+    cmd, stdin = _files_cmd(src_sv, dst_sv, kind, src_id, get_id() or "<new id>", runs) if runs else (None, None)
+    shown = (f"{cmd} <<'EOF'\n{stdin}EOF" if cmd else f"no {what} folder to copy") + \
+            ("\n# <new id>: the id the experiment gets in the synchronised database (step above)" if cmd and "<new id>" in cmd else "")
+    return actions.step(f"copy the {what} of {name} ({n} run folders, {size / 1e9:.2f} GB) to {dst_sv['name']}", fn=go, display=shown, timeout=24 * 3600)
+
+
+def _check_folders(src_sv, dst_sv, groups):
+    """groups: [(name, kind, src_id, d_id, runs)]: the folders on both servers must have the same files and bytes."""
+    sp, dp = core.server_paths(src_sv), core.server_paths(dst_sv)
+    out, bad = [], []
+    for name, kind, src_id, d_id, runs in groups:
+        if not runs:
+            continue
+        s, _ = _sizes(src_sv, sp["artifacts"], sp["checkpoints"], [(kind, f"{src_id}/{r}") for r in runs])
+        d, _ = _sizes(dst_sv, dp["sync_artifacts"], dp["sync_checkpoints"], [(kind, f"{d_id}/{r}") for r in runs])
+        what = "artifacts" if kind == "a" else "checkpoints"
+        for r in runs:
+            a, b = s.get((kind, f"{src_id}/{r}")), d.get((kind, f"{d_id}/{r}"))
+            if a != b:
+                bad.append(f"{name} {what} {src_id}/{r}: {a} on {src_sv['name']}, {b} on {dst_sv['name']} (files, bytes)")
+        out.append(f"{name}: {len(runs)} {what} folders identical (files and bytes{', MLmodel aside' if kind == 'a' else ''})")
+    if bad:
+        raise RuntimeError("\n".join(bad))
+    return "\n".join(out) + "\n"
+
+
 def sync_steps(src_sv, dst_sv, names):
     plan = PLANS.get(src_sv["name"])
     if not plan:
@@ -276,7 +353,6 @@ def sync_steps(src_sv, dst_sv, names):
     sp, dp = core.server_paths(src_sv), core.server_paths(dst_sv)
     s_what, d_what = f"the database of {src_sv['name']}", f"the synchronised database on {dst_sv['name']}"
     ctx = {"exp": {x["name"]: x["dst_id"] for x in chosen}}
-    same = src_sv["name"] == dst_sv["name"]
 
     def experiments():
         """Check the preview still holds; create the experiments missing from the synchronised database."""
@@ -311,23 +387,6 @@ def sync_steps(src_sv, dst_sv, names):
             out.append(f"{x['name']}: {len(x['runs'])} run(s) to copy, experiment id {x['src_id']} -> {ctx['exp'][x['name']]}")
         return "\n".join(out) + "\n"
 
-    def files_cmd(x, kind):
-        """The copy of one experiment's run folders of one kind (a: artifacts, c: checkpoints): (bash pipeline, stdin)."""
-        runs = [r for r in x.get("runs", x["new"] + x["changed"]) if kind in x["folders"].get(r, {})]
-        if not runs:
-            return None, None
-        s_root, d_root = (sp["artifacts"], dp["sync_artifacts"]) if kind == "a" else (sp["checkpoints"], dp["sync_checkpoints"])
-        d_id = ctx["exp"].get(x["name"]) or "<new id>"
-        q = shlex.quote
-        unpack = f"mkdir -p {q(d_root)} && tar -C {q(d_root)} -xf - --transform=s,^{x['src_id']}/,{d_id}/,"
-        pack = f"tar -C {q(s_root)} -cf - -T -"
-        ssh = lambda sv: shlex.join(remote.ssh_argv(sv))     # noqa: E731  (the remote commands below: paths and tar only)
-        if same:
-            cmd = f'{ssh(src_sv)} "{pack} | {unpack}"'
-        else:
-            cmd = f'{ssh(src_sv)} "{pack}" | {ssh(dst_sv)} "{unpack}"'
-        return "set -o pipefail; " + cmd, "".join(f"{x['src_id']}/{r}\n" for r in runs)
-
     def mlmodel_script(x):
         """MLmodel names its checkpoint by a path under the experiment id: on the central server, the new id."""
         d_id = ctx["exp"].get(x["name"]) or "<new id>"
@@ -346,24 +405,6 @@ def sync_steps(src_sv, dst_sv, names):
             return f"$ {shlex.join(remote.ssh_argv(dst_sv, 'bash -s'))} <<'EOF'\n{s}\nEOF\n{r.stdout}"
         return actions.step(f"point the MLmodel files of {x['name']} to the checkpoints' new folder (experiment id {x['src_id']} -> {x['dst_id'] or 'new id'})",
                             fn=go, display=f"{shlex.join(remote.ssh_argv(dst_sv, 'bash -s'))} <<'EOF'\n{mlmodel_script(x)}\nEOF", timeout=600)
-
-    def files_step(x, kind):
-        what = "artifacts" if kind == "a" else "checkpoints"
-
-        def go():
-            cmd, stdin = files_cmd(x, kind)
-            if not cmd:
-                return f"no {what} folder to copy\n"
-            r = subprocess.run(["bash", "-c", cmd], input=stdin, capture_output=True, text=True, timeout=24 * 3600, check=False)
-            if r.returncode:
-                raise RuntimeError(f"copy failed (exit {r.returncode}): {r.stderr.strip()}")
-            return f"$ {cmd} <<'EOF'\n{stdin}EOF\n{r.stdout}{r.stderr}copied {stdin.count(chr(10))} folder(s)\n"
-        cmd, stdin = files_cmd(x, kind)
-        n = len([r for r in x["new"] + x["changed"] if kind in x["folders"].get(r, {})])
-        size = sum(x["folders"][r][kind][1] for r in x["new"] + x["changed"] if kind in x["folders"].get(r, {}))
-        shown = (f"{cmd} <<'EOF'\n{stdin}EOF" if cmd else f"no {what} folder to copy") + \
-                ("\n# <new id>: the id the experiment gets in the synchronised database (step above)" if cmd and "<new id>" in cmd else "")
-        return actions.step(f"copy the {what} of {x['name']} ({n} run folders, {size / 1e9:.2f} GB) to {dst_sv['name']}", fn=go, display=shown, timeout=24 * 3600)
 
     def rows():
         out = []
@@ -434,24 +475,6 @@ def sync_steps(src_sv, dst_sv, names):
             raise RuntimeError("\n".join(bad))
         return "\n".join(out) + "\nrows identical\n"
 
-    def check_files():
-        out, bad = [], []
-        for x in chosen:
-            d_id = ctx["exp"][x["name"]]
-            items_s = [(k, f"{x['src_id']}/{r}") for r in x["runs"] for k in ("a", "c") if k in x["folders"].get(r, {})]
-            if not items_s:
-                continue
-            s, _ = _sizes(src_sv, sp["artifacts"], sp["checkpoints"], items_s)
-            d, _ = _sizes(dst_sv, dp["sync_artifacts"], dp["sync_checkpoints"], [(k, f"{d_id}/{rel.split('/', 1)[1]}") for k, rel in items_s])
-            for k, rel in items_s:
-                a, b = s.get((k, rel)), d.get((k, f"{d_id}/{rel.split('/', 1)[1]}"))
-                if a != b:
-                    bad.append(f"{x['name']} {'artifacts' if k == 'a' else 'checkpoints'} {rel}: {a} here, {b} there (files, bytes)")
-            out.append(f"{x['name']}: {len(items_s)} folders identical (files and bytes, MLmodel aside)")
-        if bad:
-            raise RuntimeError("\n".join(bad))
-        return "\n".join(out) + "\n"
-
     steps = [*tunnel_steps(src_sv, "own", s_what), *tunnel_steps(dst_sv, "sync", d_what),
              actions.step("check that the preview still holds, create the experiments missing from the synchronised database", fn=experiments,
                           display="through the tunnels: the preview again (read-only); then in the synchronised database, for each experiment it lacks:\n"
@@ -459,7 +482,10 @@ def sync_steps(src_sv, dst_sv, names):
                                   f"'{dp['sync_artifacts']}/<its id>'; INSERT INTO experiment_tags ...\n"
                                   + "\n".join(f"  {x['name']}: " + (f"id {x['dst_id']} there" if x["dst_id"] else "created") for x in chosen))]
     for x in chosen:
-        steps += [files_step(x, "a"), files_step(x, "c")]
+        arts = [r for r in x["new"] + x["changed"] if "a" in x["folders"].get(r, {})]
+        steps.append(_copy_step(src_sv, dst_sv, "a", x["name"], x["src_id"], lambda x=x: ctx["exp"].get(x["name"]),
+                                lambda x=x: [r for r in x.get("runs", x["new"] + x["changed"]) if "a" in x["folders"].get(r, {})],
+                                len(arts), sum(x["folders"][r]["a"][1] for r in arts)))
         if x["src_id"] != x["dst_id"] and any("a" in x["folders"].get(r, {}) for r in x["new"] + x["changed"]):
             steps.append(mlmodel_step(x))
     steps += [actions.step("copy the rows of the runs (one transaction: all or nothing)", fn=rows, timeout=24 * 3600,
@@ -472,10 +498,39 @@ def sync_steps(src_sv, dst_sv, names):
               actions.step("check the rows: counts per run and table, digests of params, tags and last metrics", fn=check_rows, timeout=3600,
                            display="read-only, both databases: per run, the number of rows of params, tags, latest_metrics, metrics and dataset inputs, "
                                    "and the run's status, end time, stage: they must be identical"),
-              actions.step(f"check the files: the folders copied, on {src_sv['name']} and on {dst_sv['name']}", fn=check_files, timeout=3600,
+              actions.step(f"check the artifacts: the folders copied, on {src_sv['name']} and on {dst_sv['name']}", timeout=3600,
+                           fn=lambda: _check_folders(src_sv, dst_sv, [(x["name"], "a", x["src_id"], ctx["exp"][x["name"]],
+                                                                       [r for r in x["runs"] if "a" in x["folders"].get(r, {})]) for x in chosen]),
                            display=f"on both servers (ssh, read-only): for each folder copied, its number of files and bytes (find -printf %s, MLmodel aside): they must be identical\n{SIZE_SCRIPT}"),
               *close_steps(src_sv, "own", s_what), *close_steps(dst_sv, "sync", d_what)]
     return steps
+
+
+def ckpt_steps(src_sv, dst_sv, names):
+    """Copy the checkpoint folders the preview found missing or different on the central server (runs already in the
+    synchronised database), then check them. No database is read or written."""
+    plan = PLANS.get(src_sv["name"])
+    if not plan:
+        raise ValueError(f"preview the sync of {src_sv['name']} first")
+    if plan["central"] != (dst_sv or {}).get("name"):
+        raise ValueError("the central server changed since the preview: preview again")
+    chosen = [x for x in plan["experiments"] if x["name"] in set(names or []) and x["ckpt"] and x["dst_id"]]
+    if not chosen:
+        raise ValueError("no checkpoint to copy in the experiments chosen")
+    steps = [_copy_step(src_sv, dst_sv, "c", x["name"], x["src_id"], lambda x=x: x["dst_id"], lambda x=x: list(x["ckpt"]),
+                        len(x["ckpt"]), sum(v[1] for v in x["ckpt"].values())) for x in chosen]
+    steps.append(actions.step(f"check the checkpoints: the folders copied, on {src_sv['name']} and on {dst_sv['name']}", timeout=3600,
+                              fn=lambda: _check_folders(src_sv, dst_sv, [(x["name"], "c", x["src_id"], x["dst_id"], list(x["ckpt"])) for x in chosen]),
+                              display=f"on both servers (ssh, read-only): for each folder copied, its number of files and bytes (find -printf %s): they must be identical\n{SIZE_SCRIPT}"))
+    return steps
+
+
+def ckpt_done(src_name, names):
+    """After a checkpoint sync that went through: those folders are there now (the preview stays usable)."""
+    for x in (PLANS.get(src_name) or {}).get("experiments", []):
+        if x["name"] in set(names or []):
+            x["ckpt_done"] += len(x["ckpt"])
+            x["ckpt"] = {}
 
 
 def _versions(src, dst, runs, sp, dp, d_id):
@@ -514,5 +569,7 @@ def light(plan):
     return {**{k: plan.get(k) for k in keep},
             "experiments": [{"name": x["name"], "src_id": x["src_id"], "dst_id": x["dst_id"], "deleted": x["deleted"], "new": len(x["new"]),
                              "changed": len(x["changed"]), "synced": x["synced"], "old_path": len(x["old_path"]), "files": x["files"], "bytes": x["bytes"],
+                             "ckpt": len(x["ckpt"]), "ckpt_bytes": sum(v[1] for v in x["ckpt"].values()), "ckpt_files": sum(v[0] for v in x["ckpt"].values()),
+                             "ckpt_wait": x["ckpt_wait"], "ckpt_done": x["ckpt_done"],
                              "old_example": x["old_path"][0]["artifact_uri"] if x["old_path"] else None} for x in plan["experiments"]]}
 
