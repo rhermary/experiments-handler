@@ -482,9 +482,9 @@ def api_launch():
 _STATUS = {}                                                 # server name -> its state from the last "status" action
 
 
-def _server_view(sv):
+def _server_view(sv, cfg=None):
     return {**sv, "paths_all": core.server_paths(sv), "connected": remote.connected(sv), "status": _STATUS.get(sv["name"]),
-            "db": _DB.get(sv["name"])}
+            "db": _DB.get(sv["name"]), "image_default": _image(cfg or core.load(), sv)}
 
 
 @app.get("/api/servers")
@@ -493,24 +493,27 @@ def api_servers():
     what the last status action read."""
     cfg = core.load()
     listed = [s for s in cfg["servers"] if "name" in s]
-    return jsonify(servers=[_server_view(s) for s in listed], central=(core.central_server(cfg) or {}).get("name"),
+    return jsonify(servers=[_server_view(s, cfg) for s in listed], central=(core.central_server(cfg) or {}).get("name"),
                    path_keys=list(core.PATH_KEYS))
 
 
 _DB = {}                                                     # server name -> its databases from the last "db_status"
 
 
-def _image(cfg):
-    """The image to run the synchronised Postgres in, when the server sets none: the Docker image variable."""
-    return next((v["value"] for v in cfg["variables"]["docker"] if v["name"] == "IMAGE_NAME"), "")
+def _image(cfg, sv=None):
+    """The default image of a server's databases: its db_image, else the Docker image variable."""
+    return ((core.server_paths(sv)["db_image"] if sv else "")
+            or next((v["value"] for v in cfg["variables"]["docker"] if v["name"] == "IMAGE_NAME"), ""))
 
 
 SERVER_ACTIONS = {
     "connect": ("open the connection", lambda cfg, sv, a: remote.connect_steps(sv)),
     "disconnect": ("close the connection", lambda cfg, sv, a: remote.disconnect_steps(sv)),
     "status": ("read the state", lambda cfg, sv, a: remote.status_steps(sv)),
-    "db_status": ("read the databases", lambda cfg, sv, a: remote.db_status_steps(sv)),
-    "db_start": ("start a database", lambda cfg, sv, a: remote.db_start_steps(sv, a.get("which", "own"), a.get("folder"), bool(a.get("allow_modif")), _image(cfg))),
+    "db_status": ("read the databases", lambda cfg, sv, a: remote.db_status_steps(sv, _image(cfg, sv))),
+    "db_start": ("start a database", lambda cfg, sv, a: remote.db_start_steps(sv, a.get("which", "own"), a.get("folder"), bool(a.get("allow_modif")),
+                                                                         str(a.get("image") or "").strip() or _image(cfg, sv))),
+    "db_pull": ("pull an image", lambda cfg, sv, a: remote.db_pull_steps(sv, str(a.get("image") or "").strip())),
     "db_stop": ("stop a database", lambda cfg, sv, a: remote.db_stop_steps(sv, a.get("which", "own"), a.get("container"))),
     "db_new": ("create a database folder", lambda cfg, sv, a: remote.db_new_steps(sv, a.get("which", "own"), __import__("datetime").date.today().strftime("%Y.%m.%d"))),
     "db_sizes": ("measure the database folders", lambda cfg, sv, a: remote.db_sizes_steps(sv, a.get("which", "own"))),
@@ -549,7 +552,7 @@ def api_servers_run():
     if body["action"] == "disconnect":
         _STATUS.pop(sv["name"], None)
         _DB.pop(sv["name"], None)
-    return jsonify(result={k: v for k, v in res.items() if k != "steps"}, steps=res["steps"], server=_server_view(sv))
+    return jsonify(result={k: v for k, v in res.items() if k != "steps"}, steps=res["steps"], server=_server_view(sv, cfg))
 
 
 @app.get("/api/actions")

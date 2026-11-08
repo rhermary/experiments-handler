@@ -106,7 +106,7 @@ Optional: `latex` and `dvisvgm` to show the LaTeX tables compiled; a LaTeX insta
 | `results.py`, `report_template.py` | Results tab; `report_template.py` is also the code of the generated report scripts |
 | `diffview.py`, `gpus.py`, `mlflow_ui.py` | Diff of two selections, GPU view, MLflow UI proxy |
 | `remote.py`, `actions.py` | servers and their databases over ssh; every action as a list of commands, shown first and logged |
-| `db/launch.sh`, `db/serve.sh` | a Postgres database and its MLflow UI in a container (not used by the page yet) |
+| `db/launch.sh`, `db/serve.sh` | a Postgres database and its MLflow UI in a container: copied to `<launcher>/db` on the server and run by Databases > Start (image chosen at each start) |
 | `xpqueue.py` | queue of experiments (frozen scripts, started when their GPUs are free) |
 | `*.js`, `app.css`, `index.html` | the page (no build step) |
 | `defaults.yaml`, `template.example.sh` | example settings and script template |

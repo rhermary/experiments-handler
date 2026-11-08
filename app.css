@@ -885,3 +885,7 @@ body.tab-databases main > section:not(#databasestab), body.tab-databases main > 
 
 .db-warn { margin: 0; padding: 6px 10px; border-left: 3px solid var(--warn-ink, #93600a); background: var(--add-bg, #fbf3df); border-radius: 4px; font-size: 12.5px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .db-nosync { border-style: dashed; }
+
+.db-image { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; }
+.db-image select { max-width: 420px; font-family: var(--mono, monospace); font-size: 12px; }
+.db-image-txt { width: 260px; font-family: var(--mono, monospace); font-size: 12px; }

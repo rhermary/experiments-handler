@@ -31,7 +31,7 @@ done
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 mkdir -p "$socket"
 
-docker run --detach --rm \
+docker run --detach --rm --pull never \
     --name "$name" --label "launcher.db=$label" \
     --user "$(id -u)" \
     --volume /etc/passwd:/etc/passwd:ro --volume /etc/group:/etc/group:ro \

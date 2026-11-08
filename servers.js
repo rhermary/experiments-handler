@@ -5,19 +5,20 @@
    ran, its commands and their output are shown (and kept in the action log).
    Depends on editors.js ($, h, api, status) and app.js (cfg, commit, clone). */
 (() => {
-  const S = { data: null, tab: null, busy: {}, log: [], pick: {}, modif: {} };
+  const S = { data: null, tab: null, busy: {}, log: [], pick: {}, modif: {}, image: {} };
   const LABELS = {
     base: ['Base folder', 'the other paths default to it'], db_pattern: ['Own databases', 'Postgres data folders (<server>_<date>_db)'],
     psql_sock: ['Own Postgres socket', ''], pg_port: ['Own Postgres port', ''], artifacts: ['Artifacts', 'of the runs made here'],
     checkpoints: ['Checkpoints', 'of the runs made here'], launcher: ['Launcher folder', 'repo mirror, launches, queue'],
-    scripts: ['Your scripts', 'launch-server.sh, server.sh'], empty_db: ['Empty database', 'copied to make a new dated one'],
+    scripts: ['Your scripts', 'launch-server.sh, server.sh (not used by the page)'], empty_db: ['Empty database', 'copied to make a new dated one'],
     synchronised: ['Synchronised data', 'central server only'], sync_sock: ['Synchronised Postgres socket', 'central server only'],
     sync_port: ['Synchronised Postgres port', 'central server only'],
-    db_image: ['Postgres image', 'for the synchronised database (default: the Docker image variable)'],
+    db_image: ['Database image', 'default image to start the databases in (else the Docker image variable); can be changed at each start'],
+    ui_port: ['Own MLflow UI port', 'on the server'], sync_ui_port: ['Synchronised MLflow UI port', 'on the server'],
   };
   const DERIVED = [['repo', 'Repo mirror'], ['launches', 'Launch folders'], ['queue', 'Queue'], ['sync_db_pattern', 'Synchronised databases'],
     ['sync_artifacts', 'Synchronised artifacts'], ['sync_checkpoints', 'Synchronised checkpoints']];
-  const CENTRAL_KEYS = new Set(['synchronised', 'sync_sock', 'sync_port', 'db_image', 'sync_db_pattern', 'sync_artifacts', 'sync_checkpoints']);
+  const CENTRAL_KEYS = new Set(['synchronised', 'sync_sock', 'sync_port', 'sync_ui_port', 'sync_db_pattern', 'sync_artifacts', 'sync_checkpoints']);
 
   const pill = (cls, text, title) => h('span', { class: 'sv-pill ' + cls, title: title || null }, text);
   const base = (p) => String(p || '').split('/').pop();
@@ -223,22 +224,42 @@
       h('dl', { class: 'db-facts' },
         h('dt', {}, 'Folder in use'), h('dd', {}, inUse ? h('code', { class: 'sv-path', title: db.data_directory ? 'asked to Postgres (show data_directory)' : 'from the container' }, inUse) : h('span', { class: 'hint' }, running ? 'unknown' : 'none (stopped)')),
         h('dt', {}, 'Container'), h('dd', {}, c ? h('span', {}, h('code', {}, c.id), ` ${c.name} · ${c.image} · started ${c.started}`,
-          which === 'own' ? h('span', { class: 'hint' }, ` · ${c.folder ? 'folder given' : 'newest folder'}${c.allow_modif ? ' · changes allowed in the MLflow UI' : ''}`) : '')
+          h('span', { class: 'hint' }, ` · by ${c.by}${c.allow_modif ? ' · changes allowed in the MLflow UI' : ''}`))
           : h('span', { class: 'hint' }, 'none of yours running')),
-        ...(which === 'own' && c ? [h('dt', {}, 'MLflow UI'), h('dd', {}, h('code', {}, `${sv.host}:5923`), h('span', { class: 'hint' }, ' (published by your launch-server.sh)'))] : [])),
+        ...(c ? [h('dt', {}, 'MLflow UI'), h('dd', {}, h('code', {}, `${sv.host}:${which === 'own' ? p.ui_port : p.sync_ui_port}`))] : [])),
       folders.length ? h('div', { class: 'rs-scroll' }, h('table', { class: 'db-folders' },
         h('thead', {}, h('tr', {}, ...['', 'Folder', 'Date', 'Size', ''].map((t) => h('th', {}, t)))), h('tbody', {}, ...rows)))
         : h('p', { class: 'hint' }, `no folder matches ${which === 'own' ? p.db_pattern : p.sync_db_pattern}`),
+      imagePicker(sv, key),
       h('div', { class: 'db-acts' },
-        actionButton(sv, 'db_start', `Start on ${pick ? base(pick) : '...'}`, { primary: true, disabled: !sv.connected || running || !pick,
-          args: { which, folder: pick, allow_modif: !!S.modif[key] }, after: 'read the databases again to see it',
-          title: running ? 'Already running: stop it first' : which === 'own' ? 'Runs your launch-server.sh with this folder' : 'Runs Postgres for the synchronised database' }),
-        which === 'own' ? h('label', { class: 'db-opt', title: 'launch-server.sh --allow-modif: the MLflow UI can change the database' }, modif, 'allow changes in the MLflow UI') : '',
+        actionButton(sv, 'db_start', `Start on ${pick ? base(pick) : '...'}`, { primary: true, disabled: !sv.connected || running || !pick || !S.image[key],
+          args: { which, folder: pick, allow_modif: !!S.modif[key], image: S.image[key] }, after: 'read the databases again to see it',
+          title: running ? 'Already running: stop it first' : `db/launch.sh in ${S.image[key]}: Postgres, then the MLflow UI on port ${which === 'own' ? p.ui_port : p.sync_ui_port}` }),
+        h('label', { class: 'db-opt', title: 'launch.sh --allow-modif: the MLflow UI can change the database (else it reads only)' }, modif, 'allow changes in the MLflow UI'),
         actionButton(sv, 'db_stop', 'Stop', { danger: true, confirm: 'Click again to stop', disabled: !sv.connected || !c, args: { which, container: c?.id }, after: 'read the databases again to see it',
           title: c ? `docker container stop ${c.id}` : 'no container of yours is running' }),
         actionButton(sv, 'db_new', 'New dated database', { confirm: 'Click again to create it', disabled: !sv.connected || !sv.db?.empty_db, args: { which },
           title: sv.db?.empty_db ? `a copy of ${p.empty_db}` : `${p.empty_db} not found` }),
         actionButton(sv, 'db_sizes', 'Measure sizes', { disabled: !sv.connected || !folders.length, args: { which }, title: 'du on the folders (can take a while)' })));
+  }
+
+  /* the image a database starts in: one found on the server, or any other name (then: Pull image) */
+  function imagePicker(sv, key) {
+    const found = (sv.db?.images || []).map((i) => i.image);
+    const def = sv.image_default || '';
+    const cur = S.image[key] ?? (found.includes(def) || !found.length ? def : found[0]);
+    S.image[key] = cur;
+    const there = found.includes(cur);
+    const sel = h('select', { 'aria-label': 'Image to start the database in' },
+      ...found.map((i) => { const m = sv.db.images.find((x) => x.image === i); return h('option', { value: i, selected: i === cur ? '' : null }, `${i}  (${m.created}, ${m.size})`); }),
+      h('option', { value: '', selected: there ? null : '' }, found.length ? 'other...' : '(none found on the server)'));
+    const txt = h('input', { type: 'text', value: cur, placeholder: 'repository:tag', class: 'db-image-txt', spellcheck: 'false', 'data-key': key });
+    sel.addEventListener('change', () => { S.image[key] = sel.value; paint(); if (!sel.value) $('.db-image-txt[data-key="' + key + '"]')?.focus(); });
+    txt.addEventListener('change', () => { S.image[key] = txt.value.trim(); paint(); });
+    return h('div', { class: 'db-image' }, h('span', { class: 'hint' }, 'Image'), sel, there ? '' : txt,
+      there ? pill('ok', 'on the server') : cur ? pill('bad', 'not on the server', 'starting refuses to download it: pull it first') : '',
+      cur === def ? h('span', { class: 'hint' }, 'default') : h('button', { type: 'button', class: 'sv-btn', onclick: () => { S.image[key] = def; paint(); } }, `default: ${def || 'none'}`),
+      !there && cur ? actionButton(sv, 'db_pull', `Pull ${cur}`, { disabled: !sv.connected, args: { image: cur }, after: 'read the databases again to see it', title: `docker pull ${cur} on ${sv.name} (can take minutes)` }) : '');
   }
 
   /* a synchronised database: on the central server always, elsewhere when one was found */

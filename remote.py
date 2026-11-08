@@ -103,9 +103,11 @@ def _db(sv, which):
 
 
 SYNC_CONTAINER = "launcher-synchronised-db"
+CONTAINERS = {"own": "launcher-db", "sync": SYNC_CONTAINER}
+HERE = Path(__file__).resolve().parent
 
 
-def db_status_steps(sv):
+def db_status_steps(sv, image=""):
     """Read-only: Postgres sockets, the database containers (yours: server.sh, or the synchronised one), the folder
     each Postgres uses (asked inside its container), the dated folders, and whether _empty_db exists."""
     p = core.server_paths(sv)
@@ -113,8 +115,11 @@ def db_status_steps(sv):
     lines = ["echo @@CONTAINERS",
              "docker ps -q | xargs -r docker inspect --format "
              "'{{.Id}}|{{.Config.User}}|{{.State.StartedAt}}|{{.Config.Image}}|{{.Name}}|{{json .Config.Env}}|{{json .Config.Cmd}}' 2>/dev/null"
-             f" | awk -F'|' -v u=\"$(id -u)\" '$2==u && ($0 ~ /server(-ssl)?\\.sh/ || $5 ~ /{SYNC_CONTAINER}/)'",
-             f"echo @@EMPTY; test -d {q(p['empty_db'])} && echo yes || echo no"]
+             f" | awk -F'|' -v u=\"$(id -u)\" '$2==u && ($0 ~ /server(-ssl)?\\.sh/ || $5 ~ /launcher-(synchronised-)?db/)'",
+             f"echo @@EMPTY; test -d {q(p['empty_db'])} && echo yes || echo no",
+             # the images on the server (of the same repository as the default one), to choose the one to start
+             "echo @@IMAGES; docker images " + (q(image.rsplit(":", 1)[0]) + " " if image else "")
+             + "--format '{{.Repository}}:{{.Tag}}|{{.CreatedSince}}|{{.Size}}' 2>/dev/null | grep -v '<none>'"]
     for which in ("own", "sync"):
         sock, port, pattern, _ = _db(sv, which)
         lines += [f"echo @@{which.upper()}_SOCK; test -S {q(sock)}/.s.PGSQL.{port} && echo running || echo stopped",
@@ -144,9 +149,15 @@ def parse_db_status(sv, text):
             env = {}
         kind = "sync" if SYNC_CONTAINER in name else "own"
         containers.append({"id": cid[:12], "started": started[:19].replace("T", " "), "image": image, "name": name.lstrip("/"),
-                           "kind": kind, "cmd": cmd, "folder": env.get("FOLDER") or None,
+                           "kind": kind, "cmd": cmd, "folder": env.get("FOLDER") or env.get("POSTGRES_DATA") or None,
+                           "by": "launcher" if name.lstrip("/") in CONTAINERS.values() else "launch-server.sh",
                            "synched": env.get("SYNCHED") == "true", "allow_modif": env.get("ALLOW_MODIF") == "true"})
-    out = {"empty_db": (sec.get("EMPTY") or ["no"])[0] == "yes", "containers": containers}
+    images = []
+    for ln in sec.get("IMAGES", []):
+        name, _, rest = ln.partition("|")
+        created, _, size = rest.partition("|")
+        images.append({"image": name, "created": created, "size": size})
+    out = {"empty_db": (sec.get("EMPTY") or ["no"])[0] == "yes", "containers": containers, "images": images}
     for which in ("own", "sync"):
         w = which.upper()
         out[which] = {"state": (sec.get(f"{w}_SOCK") or ["?"])[0], "folders": sec.get(f"{w}_FOLDERS", []),
@@ -155,28 +166,41 @@ def parse_db_status(sv, text):
     return out
 
 
+def _scp_target(sv, path):
+    return (f"{sv['user']}@" if sv.get("user") else "") + f"{sv['host']}:{path}"
+
+
 def db_start_steps(sv, which, folder, allow_modif=False, image=""):
-    """Start a database: your launch-server.sh for the server's own one (its container runs server.sh: Postgres on
-    psql_sock:5555 and the MLflow UI on port 5923); for the synchronised one (central server), Postgres alone in a
-    container of the same image, on its own socket and port."""
+    """Start a database with the launcher's db/launch.sh (copied to <launcher>/db on the server first): a container of
+    `image` runs db/serve.sh, Postgres on the database's socket and port, then the MLflow UI (port 5923 for the own
+    database, 5924 for the synchronised one). The image must be on the server already (Pull image): nothing is
+    downloaded while starting."""
     p = core.server_paths(sv)
     sock, port, _, label = _db(sv, which)
     if not folder:
         raise ValueError("choose the database folder to start")
-    q = shlex.quote
-    if which == "own":
-        cmd = f"bash {q(p['scripts'])}/launch-server.sh --folder {q(folder)}" + (" --allow-modif" if allow_modif else "")
-        return [ssh_script(f"start the {label} of {sv['name']} on {folder.rsplit('/', 1)[-1]} (your launch-server.sh)", sv, cmd, timeout=120)]
-    image = p["db_image"] or image
     if not image:
-        raise ValueError("no image to run Postgres in: set the Postgres image of the central server (Edit servers > Paths)")
+        raise ValueError("no image to start the database in: choose one")
+    q = shlex.quote
+    dest = f"{p['launcher']}/db"
+    CTL_DIR.mkdir(mode=0o700, exist_ok=True)
+    scp = ["scp", "-q", "-o", f"ControlPath={CTL_DIR}/%C", "-o", "BatchMode=yes", "-o", "ControlMaster=no",
+           "-P", str(sv.get("port") or 22), str(HERE / "db" / "launch.sh"), str(HERE / "db" / "serve.sh"), _scp_target(sv, dest + "/")]
+    ui = p["ui_port"] if which == "own" else p["sync_ui_port"]
     script = "\n".join([
-        f"mkdir -p {q(sock)}",
-        f"docker run --detach --rm --name {SYNC_CONTAINER} --user \"$(id -u)\" \\",
-        f"  --volume {q(p['synchronised'])}:{q(p['synchronised'])} \\",
-        f"  {q(image)} \\",
-        f"  /usr/lib/postgresql/16/bin/postgres -k {q(sock)} -p {port} -D {q(folder)}"])
-    return [ssh_script(f"start the {label} on {sv['name']} ({folder.rsplit('/', 1)[-1]}, port {port})", sv, script, timeout=120)]
+        f"docker image inspect {q(image)} >/dev/null 2>&1 || {{ echo '{image} is not on {sv['name']}: pull it first (Pull image)' >&2; exit 1; }}",
+        f"bash {q(dest)}/launch.sh --image {q(image)} --name {CONTAINERS[which]} --label {which} \\",
+        f"  --folder {q(folder)} --socket {q(sock)} --port {port} --ui-port {ui}" + (" --allow-modif" if allow_modif else "")])
+    return [ssh_script(f"make the folder of the launcher's database scripts on {sv['name']}", sv, f"mkdir -p {q(dest)}", timeout=30),
+            actions.step(f"copy db/launch.sh and db/serve.sh to {dest}", scp, timeout=60),
+            ssh_script(f"start the {label} of {sv['name']} on {folder.rsplit('/', 1)[-1]} ({image}, MLflow UI on port {ui})", sv, script, timeout=90)]
+
+
+def db_pull_steps(sv, image):
+    """docker pull of an image on the server (can take minutes)."""
+    if not image:
+        raise ValueError("no image to pull")
+    return [actions.step(f"pull {image} on {sv['name']}", ssh_argv(sv, f"docker pull --quiet {shlex.quote(image)}"), timeout=1800)]
 
 
 def db_stop_steps(sv, which, container):
@@ -207,8 +231,9 @@ def db_sizes_steps(sv, which):
 
 def db_scripts_steps(sv):
     p = core.server_paths(sv)
-    return [actions.step(f"show the scripts used to start a database on {sv['name']}",
-                         ssh_argv(sv, f"cat {shlex.quote(p['scripts'])}/launch-server.sh {shlex.quote(p['scripts'])}/server.sh"), timeout=30)]
+    d = shlex.quote(f"{p['launcher']}/db")
+    return [actions.step(f"show the database scripts on {sv['name']} (copied there at each start)",
+                         ssh_argv(sv, f"cat {d}/launch.sh {d}/serve.sh"), timeout=30)]
 
 
 def parse_status(text):
