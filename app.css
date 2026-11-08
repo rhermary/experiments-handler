@@ -360,7 +360,11 @@ body.dragging-var .card[data-bid] .rows { outline: 1px dashed var(--line); outli
 .seg button { padding: 5px 12px; border: 0; border-right: 1px solid var(--line); background: var(--panel); color: var(--mute); font-size: 13px; cursor: pointer; }
 .seg button:last-child { border-right: 0; }
 .seg button[aria-pressed="true"] { background: var(--sel); color: var(--ink); font-weight: 600; }
-header .tabs { margin-right: auto; }
+header .tabs { margin-right: auto; display: inline-flex; flex-wrap: wrap; gap: 8px; }
+header .brand { display: inline-flex; align-items: center; gap: 8px; }
+header .brand img { display: block; }
+.seg.tools button { color: var(--ink); }
+.seg button:hover:not([aria-pressed="true"]) { background: var(--bg); }
 #results { display: none; }
 body.tab-results #results { display: grid; gap: 12px; }
 body.tab-results main > section:not(#results), body.tab-results main > #output, body.tab-results .bar,
@@ -920,3 +924,4 @@ body.tab-sync main > section:not(#synctab), body.tab-sync main > #output, body.t
 .sync-table td.sync-cb { width: 1%; padding-left: 12px; border-left: 1px solid var(--line); }
 .sync-last { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; color: var(--mute); }
 .sync-last .sync-out { flex-basis: 100%; }
+header #reload { padding: 5px 12px; font-size: 13px; border-radius: 8px; }

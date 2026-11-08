@@ -1011,13 +1011,13 @@
     } else paint();
   }
 
-  const tabs = h('span', { class: 'seg tabs' },
-    h('button', { type: 'button', id: 'tab-launcher', 'aria-pressed': 'true', onclick: () => switchTab('launcher') }, 'Launcher'),
-    h('button', { type: 'button', id: 'tab-results', 'aria-pressed': 'false', onclick: () => switchTab('results') }, 'Results'),
-    h('button', { type: 'button', id: 'tab-mlflow', 'aria-pressed': 'false', onclick: () => switchTab('mlflow') }, 'MLflow'),
+  const tab = (id, label) => h('button', { type: 'button', id: 'tab-' + id, 'aria-pressed': String(id === 'launcher'), onclick: () => switchTab(id) }, label);
+  const tabs = h('span', { class: 'tabs' },
+    h('span', { class: 'seg', role: 'group', 'aria-label': 'Experiment' }, tab('launcher', 'Launcher'), tab('results', 'Results'), tab('mlflow', 'MLflow')),
+    h('span', { class: 'seg', role: 'group', 'aria-label': 'Servers' },
     h('button', { type: 'button', id: 'tab-servers', 'aria-pressed': 'false', onclick: () => switchTab('servers') }, 'Servers'),
     h('button', { type: 'button', id: 'tab-databases', 'aria-pressed': 'false', onclick: () => switchTab('databases') }, 'Databases'),
-    h('button', { type: 'button', id: 'tab-sync', 'aria-pressed': 'false', onclick: () => switchTab('sync') }, 'Sync'));
+    h('button', { type: 'button', id: 'tab-sync', 'aria-pressed': 'false', onclick: () => switchTab('sync') }, 'Sync')));
   $('#xpname').after(tabs);
   // for router.js (the address of the page)
   window.XPResults = {

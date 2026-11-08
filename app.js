@@ -1,4 +1,4 @@
-/* XP launcher page. Depends on editors.js ($, h, api, status, openDialog, slug). */
+/* Athanor page. Depends on editors.js ($, h, api, status, openDialog, slug). */
 let cfg = null;                                   // config from the server (normalized)
 let st = { xp: null, blocks: {}, loop: null, values: {} };   // selection: option per block, command loop, manual variable edits
 let table = {};                                   // effective variables from the last render: name -> {value, source, scope, ...}

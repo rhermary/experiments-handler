@@ -1,4 +1,6 @@
-# experiments-handler
+# Athanor
+
+*(repository: experiments-handler)*
 
 A small web app to build, launch and analyse the experiments of a Python research project configured with
 [jsonargparse](https://jsonargparse.readthedocs.io) and tracked with [MLflow](https://mlflow.org).

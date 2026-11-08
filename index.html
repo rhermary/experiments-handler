@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>XP launcher</title>
+<title>Athanor</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/favicon.ico">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/app.css">
 </head>
@@ -25,10 +26,12 @@
       <button class="icon" id="toggle" type="button" aria-label="Toggle experiments panel" aria-expanded="true">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
       </button>
-      <h1>XP launcher</h1>
+      <h1 class="brand"><img src="/favicon.svg" alt="" width="24" height="24">Athanor</h1>
       <span class="xpname" id="xpname"></span>
-      <button class="ghost" id="template" type="button">Template</button>
-      <button class="ghost" id="settings" type="button">Settings</button>
+      <span class="seg tools" role="group" aria-label="Configuration">
+        <button id="template" type="button">Template</button>
+        <button id="settings" type="button">Settings</button>
+      </span>
       <button class="ghost" id="reload" type="button">Reload config</button>
     </header>
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""XP launcher: pick an XP, one option per block, the command loop and the variables;
+"""Athanor: pick an XP, one option per block, the command loop and the variables;
 the app writes <root>/scripts/<XP>/<timestamp>.sh and can run it.
 
     python app.py [--host 127.0.0.1] [--port 8000]
@@ -32,7 +32,7 @@ import results
 import xpconfigs
 
 LAUNCH_WAIT_S = 30  # how long a launch waits for the script before reporting "still running"
-PAGES = {"index.html", "app.js", "editors.js", "argpicker.js", "gpus.js", "results.js", "router.js", "queue.js", "servers.js", "app.css", "favicon.svg", "apple-touch-icon.png"}
+PAGES = {"index.html", "app.js", "editors.js", "argpicker.js", "gpus.js", "results.js", "router.js", "queue.js", "servers.js", "app.css", "favicon.svg", "favicon.ico", "apple-touch-icon.png"}
 
 app = Flask(__name__, static_folder=None)
 app.json.sort_keys = False  # key order matters (order of variables, XPs, options)

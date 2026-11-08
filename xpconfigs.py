@@ -60,7 +60,7 @@ def write(cfg, rel, text):
     return rel
 
 
-SKELETON = """# Base config written in the XP launcher: fill it with the Arguments browser (Save to: the base config file).
+SKELETON = """# Base config written in Athanor: fill it with the Arguments browser (Save to: the base config file).
 # Required values still missing are shown in red in the Config preview. Block variables are applied on top of it.
 settings:
   experiment: experiment
@@ -91,7 +91,7 @@ def create(cfg, sel, source="", from_path=""):
         read_file, _ = preview._reader(cfg, table)       # pylint: disable=protected-access
         data = yaml.safe_load(read(cfg, from_path) if is_generated(cfg, from_path) else read_file(from_path)) or {}
         _rebase_subconfigs(data, posixpath.dirname(from_path), posixpath.dirname(rel))
-        text = f"# Base config of {xp['name']}, from {from_path} (written in the XP launcher)\n" + yaml.safe_dump(data, sort_keys=False)
+        text = f"# Base config of {xp['name']}, from {from_path} (written in Athanor)\n" + yaml.safe_dump(data, sort_keys=False)
     else:
         text = SKELETON.replace("experiment: experiment", f"experiment: {xp['name']}")
     if path.exists():
@@ -233,7 +233,7 @@ def import_xp(cfg, experiment, xp_name=None):
         cfg["xps"].append(xp)
         base = copy.deepcopy(configs[0][1])
         text = (f"# Base config of {name}: the configuration of the MLflow run {configs[0][0]['id']} ({experiment}),\n"
-                "# imported by the XP launcher. What differs between the runs is set by the blocks.\n")
+                "# imported by Athanor. What differs between the runs is set by the blocks.\n")
         write(cfg, rel, text + yaml.safe_dump(base, sort_keys=False))
         cfg = use_config(cfg, name, rel, label=f"{experiment} (imported)")
         xp = core.xp_of(cfg, name)

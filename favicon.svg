@@ -1,8 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <g fill="none" stroke="#0194e2" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M10 54 L54 10"/>
-    <path d="M32 10 H54 V32"/>
-    <path d="M10 10 L23 23"/>
-    <path d="M41 41 L54 54"/>
+  <defs><radialGradient id="core" cx="32" cy="32" r="20" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1b86c4"/><stop offset="1" stop-color="#0a4f82"/></radialGradient></defs>
+  <g stroke-linejoin="round" stroke-width=".8" stroke="#07406b" stroke-opacity=".45">
+    <path d="M32.00 4.00 L56.20 18.00 L49.67 21.78 L32.00 11.56 Z" fill="#7fdcf9"/>
+    <path d="M56.20 18.00 L56.20 46.00 L49.67 42.22 L49.67 21.78 Z" fill="#1ea5ea"/>
+    <path d="M56.20 46.00 L32.00 60.00 L32.00 52.44 L49.67 42.22 Z" fill="#0a6fb0"/>
+    <path d="M32.00 60.00 L7.80 46.00 L14.33 42.22 L32.00 52.44 Z" fill="#0a6fb0"/>
+    <path d="M7.80 46.00 L7.80 18.00 L14.33 21.78 L14.33 42.22 Z" fill="#1ea5ea"/>
+    <path d="M7.80 18.00 L32.00 4.00 L32.00 11.56 L14.33 21.78 Z" fill="#7fdcf9"/>
+    <path d="M32.00 11.56 L49.67 21.78 L49.67 42.22 L32.00 52.44 L14.33 42.22 L14.33 21.78 Z" fill="url(#core)"/>
   </g>
+  <g transform="translate(5.12 18.98) scale(0.84)"><path fill="#7fdcf9" stroke="#07406b" stroke-opacity=".45" stroke-width=".9" stroke-linejoin="round" d="M32 0 C44 10 45 23 32 31 C19 23 20 10 32 0 Z"/><path fill="#43c9ed" stroke="#07406b" stroke-opacity=".45" stroke-width=".9" stroke-linejoin="round" d="M32 6 C40.500 13.500 41.500 23 32 29.500 C22.500 23 23.500 13.500 32 6 Z"/><path fill="#0a6fb0" stroke="#07406b" stroke-opacity=".45" stroke-width=".9" stroke-linejoin="round" d="M32 13 C37 18 37 24 32 27.500 C27 24 27 18 32 13 Z"/></g>
 </svg>

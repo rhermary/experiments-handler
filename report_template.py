@@ -1,6 +1,6 @@
 """Results of an XP from MLflow: the runs labelled by dimensions, a LaTeX table and dot plots.
 
-Written by the XP launcher: CONFIG (between the two CONFIG markers) holds the settings of the XP, the rest is the same
+Written by Athanor: CONFIG (between the two CONFIG markers) holds the settings of the XP, the rest is the same
 code the launcher uses for its preview. Nothing is precomputed: the runs are read from MLflow each time.
 
     python THIS_FILE.py [output folder] [--table] [--plot] [--view ID] [--preview]   (figures: PDF, and PNG to look at)

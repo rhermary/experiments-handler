@@ -392,7 +392,7 @@
 
   window.argPicker = { open };
 
-  const button = h('button', { class: 'ghost', id: 'args', type: 'button', title: 'Browse the program arguments (from the classes in src/) and set them' }, 'Arguments');
+  const button = h('button', { id: 'args', type: 'button', title: 'Browse the program arguments (from the classes in src/) and set them' }, 'Arguments');
   $('#settings').before(button);
   button.addEventListener('click', () => open());
 })();
