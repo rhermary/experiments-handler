@@ -156,9 +156,11 @@ def compute(src, dst, sp, dp):
 
 
 SIZE_SCRIPT = """# for each run folder (kind, path relative to its root), on stdin: whether it exists, its files and bytes
+# (C locale and %.0f: awk would print a large total as 2,15047e+09)
+export LC_ALL=C
 while read -r kind rel; do
   case "$kind" in a) d="$A/$rel" ;; c) d="$C/$rel" ;; esac
-  if [ -d "$d" ]; then find "$d" -type f ! -name MLmodel -printf '%s\\n' | awk -v k="$kind" -v r="$rel" '{n++; s+=$1} END {print k, r, n+0, s+0}'; else echo "$kind $rel -"; fi
+  if [ -d "$d" ]; then find "$d" -type f ! -name MLmodel -printf '%s\\n' | awk -v k="$kind" -v r="$rel" '{n++; s+=$1} END {printf "%s %s %d %.0f\\n", k, r, n, s}'; else echo "$kind $rel -"; fi
 done"""
 
 
@@ -175,7 +177,7 @@ def _sizes(sv, a_root, c_root, items):
     for ln in r.stdout.splitlines():
         p = ln.split()
         if len(p) == 4:
-            out[(p[0], p[1])] = (int(p[2]), int(p[3]))
+            out[(p[0], p[1])] = (int(p[2]), int(float(p[3].replace(',', '.'))))
         elif len(p) == 3:
             out[(p[0], p[1])] = None
     return out, shlex.join(argv) + " <<'EOF'\n" + "\n".join(f"{k} {rel}" for k, rel in items[:5]) + (f"\n... ({len(items)} folders)" if len(items) > 5 else "") + "\nEOF"
