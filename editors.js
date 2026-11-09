@@ -144,8 +144,9 @@ function openDialog({ title, fields, onSubmit, remove, wide = false, submitLabel
       : h('div', { class: 'dfield' }, h('label', {}, h('span', {}, f.label), f.type === 'pairs' ? '' : el), f.type === 'pairs' ? el : '', hint);
   });
   const fail = (e) => { err.textContent = e.message; };
+  const vals = () => Object.fromEntries(Object.entries(getters).map(([k, g]) => [k, g()]));
   const actions = h('div', { class: 'dlg-actions' },
-    remove ? h('button', { type: 'button', class: 'danger', onclick: () => remove().then((done) => done !== false && dlg.close()).catch(fail) }, 'Delete') : '',
+    remove ? h('button', { type: 'button', class: 'danger', onclick: () => remove(vals()).then((done) => done !== false && dlg.close()).catch(fail) }, 'Delete') : '',
     h('span', { class: 'sp' }),
     h('button', { type: 'button', onclick: () => dlg.close() }, 'Cancel'),
     h('button', { type: 'submit', class: 'primary' }, submitLabel));
@@ -153,8 +154,7 @@ function openDialog({ title, fields, onSubmit, remove, wide = false, submitLabel
   form.onsubmit = async (ev) => {
     ev.preventDefault();
     err.textContent = '';
-    const vals = Object.fromEntries(Object.entries(getters).map(([k, g]) => [k, g()]));
-    try { await onSubmit(vals); dlg.close(); } catch (e) { fail(e); }
+    try { await onSubmit(vals()); dlg.close(); } catch (e) { fail(e); }
   };
   dlg.showModal();
 }

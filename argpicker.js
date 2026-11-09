@@ -77,13 +77,8 @@
       }, { after: () => { delete st.values[name]; } });
       return;
     }
-    await commit((c) => {
-      for (const g of Object.keys(c.variables)) {
-        const x = c.variables[g].find((y) => y.name === name);
-        if (x) { x.value = value; return; }
-      }
-      c.variables.process.push({ name, label: '', value, options: [], env: false });
-    }, { after: () => { delete st.values[name]; } });
+    // the variable of this XP (the other XPs keep theirs: app.js setXpVar)
+    await commit((c) => setXpVar(c, st.xp, name, { value }, 'process'), { after: () => { delete st.values[name]; } });
   }
 
   async function removeVar(v) {
@@ -97,8 +92,8 @@
       }, { deleted: `${short(v.name)} from "${rowName}"` });
       return;
     }
-    await commit((c) => { for (const g of Object.keys(c.variables)) c.variables[g] = c.variables[g].filter((x) => x.name !== v.name); },
-      { deleted: `variable ${v.name}` });
+    // from this XP only (the other XPs keep it: app.js removeXpVar)
+    await commit((c) => removeXpVar(c, st.xp, v.name), { deleted: `variable ${v.name} from ${st.xp}` });
   }
 
   /* apply the server's answer {set: [[name, value]], remove: [{name, source}], message, source} */

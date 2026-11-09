@@ -86,6 +86,9 @@ HEADER_COMMENT = """\
 #             a row sets variables {key: value}. Blocks are not shared between XPs.
 #             kind: list -> var, items [{value, label}], vars (built from $VAR), loop: the options are one per value,
 #             and "all (N)" that runs the command loop once per value (for var.lower() in values).
+#             variables (optional): this XP's variables on top of the shared ones: {NAME: {removed: true}},
+#             {NAME: the fields edited for this XP} or {NAME: {group, label, value, options, env}} (this XP only);
+#             values (optional): the values edited in its fields {NAME: value} (they win over its blocks).
 """
 
 
@@ -234,7 +237,14 @@ def normalize(raw):
         selections = _selections(raw_sel, name)
         if selections:
             results["selections"] = selections
-        xps.append({"name": name, "blocks": blocks, **({"results": results} if results else {})})
+        own = _xp_variables(x.get("variables"), name, {v["name"] for lst in variables.values() for v in lst}, prefix)
+        values = {}
+        for k, v in (x.get("values") or {}).items():
+            if not NAME_RE.match(_text(k)):
+                raise ValueError(f"XP '{name}': values: '{k}' is not a valid variable name")
+            values[_text(k)] = _text(v)
+        xps.append({"name": name, "blocks": blocks, **({"variables": own} if own else {}),
+                    **({"values": values} if values else {}), **({"results": results} if results else {})})
     servers, seen = [], set()
     for sv in raw.get("servers") if raw.get("servers") is not None else DEFAULT_SERVERS:
         if sv.get("comment") is not None:                    # a comment line of the list, kept as written
@@ -271,6 +281,55 @@ def normalize(raw):
     if sum(1 for s in servers if s.get("central")) > 1:
         raise ValueError("servers: only one server can be the central one (where the synchronised data lives)")
     return {"version": 3, "project": p, "variables": variables, "loop": loop, "xps": xps, "servers": servers}
+
+
+VAR_FIELDS = ("label", "value", "options", "env")
+
+
+def _xp_variables(raw, xp, shared, prefix):
+    """The variables of an XP, on top of the shared ones: {name: {removed: true}} (not in this XP), {name: the fields
+    that differ} (a shared variable edited for this XP), or {name: {group, label, value, options, env}} (a variable of
+    this XP only)."""
+    out = {}
+    for name, o in (raw or {}).items():
+        name = _text(name).strip()
+        if not NAME_RE.match(name):
+            raise ValueError(f"XP '{xp}': variables: '{name}' is not a valid variable name")
+        o = o or {}
+        if o.get("removed"):
+            if name in shared:
+                out[name] = {"removed": True}
+            continue
+        e = {}
+        for k in VAR_FIELDS:
+            if k in o:
+                e[k] = bool(o[k]) if k == "env" else [_text(x) for x in o[k] or []] if k == "options" else _text(o[k])
+        if name not in shared:                               # of this XP only: complete
+            group = _text(o.get("group")) or ("process" if name.startswith(prefix) else "run")
+            if group not in GROUPS:
+                raise ValueError(f"XP '{xp}': variable {name}: unknown group '{group}'")
+            e = {"group": group, "label": "", "value": "", "options": [], "env": False, **e}
+        if e:
+            out[name] = e
+    return out
+
+
+def xp_variables(cfg, xp):
+    """{group: [variables]} as an XP sees them: the shared ones without those it removed, with its edits, then its
+    own. Each variable has "xp": "" (shared), "edited" (a shared one edited for this XP) or "own" (this XP only)."""
+    own = xp.get("variables") or {}
+    out = {}
+    for g in GROUPS:
+        lst = []
+        for v in cfg["variables"][g]:
+            o = own.get(v["name"])
+            if o and o.get("removed"):
+                continue
+            lst.append({**v, **{k: o[k] for k in VAR_FIELDS if k in o}, "xp": "edited"} if o else {**v, "xp": ""})
+        lst += [{"name": n, **{k: o[k] for k in VAR_FIELDS}, "xp": "own"} for n, o in own.items()
+                if o.get("group") == g and not o.get("removed")]
+        out[g] = lst
+    return out
 
 
 def _dimensions(raw, xp):
@@ -533,7 +592,8 @@ def pick(rows, name, what):
 
 
 def collect(cfg, sel):
-    """Resolve every variable for a selection: defaults < blocks of the XP (in order) < manual edits."""
+    """Resolve every variable for a selection: defaults (the XP's variables: xp_variables) < blocks of the XP (in
+    order) < edits of the values."""
     prefix = cfg["project"]["env_prefix"]
     xp = xp_of(cfg, sel.get("xp"))
     table = {}
@@ -546,8 +606,8 @@ def collect(cfg, sel):
                        "env": bool(env) or name.startswith(prefix), "source": source}
 
     put("XP", xp["name"], "run", False, "XP name")
-    for g in GROUPS:
-        for v in cfg["variables"][g]:
+    for g, lst in xp_variables(cfg, xp).items():
+        for v in lst:
             put(v["name"], v["value"], g, v["env"], "default")
     header = [f"# Generated by Athanor on {datetime.now():%Y-%m-%d %H:%M:%S}", f"# XP: {xp['name']}"]
     chosen = sel.get("blocks") or {}
@@ -556,7 +616,8 @@ def collect(cfg, sel):
         header.append(f"# {b['label']}: {row['name']}")
         for k, val in row["vars"].items():
             put(full_name(b, k, prefix), val, "entity", False, f"{b['label']}: {row['name']}")
-    for name, val in (sel.get("values") or {}).items():
+    # edits of the values: the selection's (the page sends the XP's saved edits with its own), else the XP's saved ones
+    for name, val in (sel["values"] if "values" in sel else xp.get("values") or {}).items():
         if name in table:
             table[name].update(value=_text(val), source="edited")
     looped = set()

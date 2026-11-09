@@ -2,7 +2,7 @@
    in a new tab, and Back / Forward work:
      #xp=<XP>&b.<block id>=<option>&loop=<option>&tab=launcher|results|mlflow&rsel=<selection>&view=table|plot|runs|v:<view>&pv=script
       &mlflow=<page of the MLflow UI>&gpus=<server>
-   Manual edits of variable values are not in it (they are not saved either).
+   Edited values of variables are not in it: they are saved with the XP (xps[].values).
    Depends on app.js (cfg, st, syncSelection, draw, setPvTab), results.js (XPResults) and gpus.js (XPGpus). */
 (() => {
   let applying = false, started = false;

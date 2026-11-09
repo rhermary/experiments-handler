@@ -66,6 +66,10 @@ def public(cfg):
     for g in out["variables"].values():
         for v in g:
             v["pretty"] = preview.pretty(v["value"])
+    for x in out["xps"]:                                     # the XP's own values of variables (Edit, this XP)
+        for o in (x.get("variables") or {}).values():
+            if "value" in o:
+                o["pretty"] = preview.pretty(o["value"])
     return out
 
 

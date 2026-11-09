@@ -1,6 +1,6 @@
 /* Athanor page. Depends on editors.js ($, h, api, status, openDialog, slug). */
 let cfg = null;                                   // config from the server (normalized)
-let st = { xp: null, blocks: {}, loop: null, values: {} };   // selection: option per block, command loop, manual variable edits
+let st = { xp: null, blocks: {}, loop: null, values: {} };   // selection: option per block, command loop, edited values (saved per XP)
 let table = {};                                   // effective variables from the last render: name -> {value, source, scope, ...}
 let loopInfo = null;                              // from the last render: {loop, loop_vars, has_loop_env, undefined}
 let checks = {};                                  // from the last preview: name -> {level, notes}
@@ -19,6 +19,79 @@ const prefix = () => cfg.project.env_prefix;
 const fullName = (b, k) => (!b.path || k.startsWith(prefix()) ? k : b.path + k);
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
+/* ---------- the variables of an XP (core.xp_variables): the shared ones (cfg.variables) without the ones it removed,
+   with its edits, then its own. xp: '' shared, 'edited' a shared one edited for this XP, 'own' of this XP only. ---------- */
+
+const VAR_FIELDS = ['label', 'value', 'options', 'env'];
+
+function xpVarsOf(c, xpName) {
+  const own = c.xps.find((x) => x.name === xpName)?.variables || {};
+  const out = {};
+  for (const [g] of GROUPS) {
+    const lst = [];
+    for (const v of c.variables[g]) {
+      const o = own[v.name];
+      if (o?.removed) continue;
+      lst.push(o ? { ...v, ...Object.fromEntries(VAR_FIELDS.filter((k) => k in o).map((k) => [k, o[k]])), pretty: o.pretty ?? (('value' in o) ? o.value : v.pretty), xp: 'edited' } : { ...v, xp: '' });
+    }
+    for (const [n, o] of Object.entries(own)) if (!o.removed && o.group === g) lst.push({ name: n, label: o.label, value: o.value, options: o.options, env: o.env, pretty: o.pretty ?? o.value, xp: 'own' });
+    out[g] = lst;
+  }
+  return out;
+}
+const xpVars = (g) => (st.xp ? xpVarsOf(cfg, st.xp)[g] : cfg.variables[g]);
+const sharedOf = (c, name) => {
+  for (const [g] of GROUPS) { const v = c.variables[g].find((x) => x.name === name); if (v) return { g, v }; }
+  return null;
+};
+
+/* set a variable for XP `xpName` only (in the copy `c`): the fields that differ from the shared one, or a variable of
+   its own (group needed) */
+function setXpVar(c, xpName, name, fields, group) {
+  const x = c.xps.find((y) => y.name === xpName);
+  x.variables = x.variables || {};
+  const sh = sharedOf(c, name);
+  if (sh) {
+    const diff = Object.fromEntries(VAR_FIELDS.filter((k) => k in fields && JSON.stringify(fields[k]) !== JSON.stringify(sh.v[k])).map((k) => [k, fields[k]]));
+    if (Object.keys(diff).length) x.variables[name] = diff; else delete x.variables[name];
+  } else {
+    const old = x.variables[name] || {};
+    x.variables[name] = { group: group || old.group || (name.startsWith(prefix()) ? 'process' : 'run'), label: '', value: '', options: [], env: false,
+      ...Object.fromEntries(VAR_FIELDS.filter((k) => k in old).map((k) => [k, old[k]])), ...fields };
+  }
+  if (!Object.keys(x.variables).length) delete x.variables;
+}
+
+/* remove a variable from XP `xpName` only: a shared one is marked removed there, one of its own is deleted */
+function removeXpVar(c, xpName, name) {
+  const x = c.xps.find((y) => y.name === xpName);
+  x.variables = x.variables || {};
+  if (sharedOf(c, name)) x.variables[name] = { removed: true }; else delete x.variables[name];
+  if (x.values) delete x.values[name];
+  if (!Object.keys(x.variables).length) delete x.variables;
+}
+
+/* ---------- the edited values, saved per XP (xps[].values) ---------- */
+
+let valuesFor = null;                             // the XP st.values belongs to
+let valuesTimer = null;
+
+function sameValues(a, b) { return JSON.stringify(Object.entries(a || {}).sort()) === JSON.stringify(Object.entries(b || {}).sort()); }
+
+function scheduleSaveValues() {
+  clearTimeout(valuesTimer);
+  valuesTimer = setTimeout(saveValues, 700);
+}
+
+async function saveValues(xpName = st.xp, values = st.values) {
+  const xp = cfg.xps.find((y) => y.name === xpName);
+  if (!xp || (xpName === st.xp && valuesFor !== st.xp) || sameValues(xp.values, values)) return;
+  const next = clone(cfg);
+  const x = next.xps.find((y) => y.name === xpName);
+  if (Object.keys(values).length) x.values = { ...values }; else delete x.values;
+  try { cfg = await api('/api/config', next, 'PUT'); status(`Saved the values of ${xpName}`); } catch (e) { status(e.message, true); }
+}
+
 /* ---------- loading and saving ---------- */
 
 function syncSelection() {
@@ -34,7 +107,12 @@ function syncSelection() {
   st.blocks = blocks;
   const loops = cfg.loop.options;
   if (!loops.some((r) => r.name === st.loop)) st.loop = loops[0]?.name ?? null;
-  const known = new Set(Object.values(cfg.variables).flat().map((v) => v.name));
+  if (valuesFor !== st.xp) {                      // another XP: save the edits of the previous one, show its saved ones
+    if (valuesFor) { clearTimeout(valuesTimer); saveValues(valuesFor, { ...st.values }); }
+    st.values = { ...(xpDef()?.values || {}) };
+    valuesFor = st.xp;
+  }
+  const known = new Set(st.xp ? Object.values(xpVarsOf(cfg, st.xp)).flat().map((v) => v.name) : []);
   for (const k of Object.keys(st.values)) if (!known.has(k)) delete st.values[k];
 }
 
@@ -50,10 +128,13 @@ async function commit(mutate, { after, deleted, done } = {}) {
   const before = clone(cfg);
   const next = clone(cfg);
   mutate(next);
+  const x = next.xps.find((y) => y.name === st.xp);
+  if (x && valuesFor === st.xp) { if (Object.keys(st.values).length) x.values = { ...st.values }; else delete x.values; }
   cfg = await api('/api/config', next, 'PUT');
   if (after) after();
   syncSelection();
   draw();
+  scheduleSaveValues();                           // `after` may have changed the edited values
   if (deleted || done) {
     status(deleted ? `Deleted ${deleted}` : done, false, { label: 'Undo', fn: async () => {
       try { cfg = await api('/api/config', before, 'PUT'); syncSelection(); draw(); status('Restored'); } catch (e) { status(e.message, true); }
@@ -583,12 +664,20 @@ function setField(name, input, v) {
 /* ---------- variables ---------- */
 
 function editVar(group, name) {
-  const v = name == null ? null : cfg.variables[group].find((x) => x.name === name);
+  const v = name == null ? null : xpVars(group).find((x) => x.name === name);
+  const shared = name == null ? null : sharedOf(cfg, name);
   const groupNames = Object.fromEntries(GROUPS.map(([g, t]) => [g, t]));
+  const xpName = st.xp;
+  const was = v?.xp === 'edited' ? ` It is edited for ${xpName}: "every XP" puts back the shared variable here, with what you save.`
+    : v?.xp === 'own' ? ` It exists in ${xpName} only: "every XP" makes it a shared variable.` : '';
   openDialog({
     title: name == null ? `Add variable (${groupNames[group]})` : `Edit ${name}`,
     wide: true,
     fields: [
+      ...(xpName ? [{ key: 'scope', type: 'select', label: 'Applies to', value: 'xp', options: [
+        { value: 'xp', label: `this XP only (${xpName}): the other XPs keep ${shared ? 'the shared variable' : 'what they have'}` },
+        { value: 'all', label: 'every XP (the shared variable)' }] },
+      { type: 'note', label: `What you save here (and Delete) changes ${xpName} only, unless "every XP" is chosen.${was}` }] : []),
       { key: 'group', type: 'select', label: 'Group', value: group, options: GROUPS.map(([g, t]) => ({ value: g, label: t })) },
       { key: 'name', label: 'Name', value: v?.name ?? '', mono: true, placeholder: group === 'process' ? `${prefix()}TASK__INIT_ARGS__BATCH_SIZE` : 'NB_RUNS' },
       { key: 'label', label: 'Label (optional)', value: v?.label ?? '' },
@@ -599,16 +688,45 @@ function editVar(group, name) {
     ],
     onSubmit: async (f) => {
       const nv = { name: f.name.trim(), label: f.label.trim(), value: f.value, options: f.options.split('\n').map((s) => s.trim()).filter(Boolean), env: f.env };
+      if (!nv.name) throw new Error('Name is required');
+      const renamed = name != null && nv.name !== name;
+      if ((name == null || renamed) && Object.values(xpVarsOf(cfg, xpName || '')).flat().some((x) => x.name === nv.name) && (f.scope !== 'all' || sharedOf(cfg, nv.name)))
+        throw new Error(`${nv.name} exists already: edit it instead`);
       await commit((c) => {
-        if (name != null) { const old = c.variables[group]; old.splice(old.findIndex((x) => x.name === name), 1); }
-        const list = c.variables[f.group];
-        const at = name != null && f.group === group ? cfg.variables[group].findIndex((x) => x.name === name) : list.length;
-        list.splice(Math.min(at, list.length), 0, nv);
+        if (f.scope === 'all' || !xpName) {
+          const own = c.xps.find((x) => x.name === xpName);
+          if (own?.variables) { delete own.variables[name]; if (renamed) delete own.variables[nv.name]; if (!Object.keys(own.variables).length) delete own.variables; }
+          const sh = name != null ? sharedOf(c, name) : null;
+          if (sh) c.variables[sh.g].splice(c.variables[sh.g].findIndex((x) => x.name === name), 1);
+          const list = c.variables[f.group];
+          const at = sh && sh.g === f.group ? cfg.variables[sh.g].findIndex((x) => x.name === name) : list.length;
+          list.splice(Math.min(at, list.length), 0, nv);
+          if (renamed && sh) for (const x of c.xps) if (x.variables?.[name]) { x.variables[nv.name] = x.variables[name]; delete x.variables[name]; }
+        } else {
+          if (shared && f.group !== shared.g && !renamed) throw new Error('The group of a shared variable changes for every XP only');
+          if (renamed) removeXpVar(c, xpName, name);
+          const { name: _n, ...fields } = nv;
+          setXpVar(c, xpName, nv.name, fields, f.group);
+        }
       });
       delete st.values[name];
+      if (renamed) delete st.values[nv.name];
+      scheduleSaveValues();
     },
-    remove: name == null ? null : async () => {
-      await commit((c) => { const l = c.variables[group]; l.splice(l.findIndex((x) => x.name === name), 1); }, { deleted: `variable ${name}` });
+    remove: name == null ? null : async (f) => {
+      if (f?.scope === 'all' || !xpName) {
+        await commit((c) => {
+          const sh = sharedOf(c, name);
+          if (sh) c.variables[sh.g].splice(c.variables[sh.g].findIndex((x) => x.name === name), 1);
+          for (const x of c.xps) {
+            if (x.variables) { delete x.variables[name]; if (!Object.keys(x.variables).length) delete x.variables; }
+            if (x.values) delete x.values[name];
+          }
+        }, { deleted: `variable ${name} (every XP)` });
+      } else {
+        await commit((c) => removeXpVar(c, xpName, name), { deleted: `variable ${name} from ${xpName}` });
+      }
+      delete st.values[name];
     },
   });
 }
@@ -875,7 +993,8 @@ function varField(group, v) {
   // one line: scope | label (name under it) | value (+ where it comes from) | suggested values | buttons
   return h('div', { class: 'field vrow', 'data-var': v.name, 'data-search': `${v.label} ${v.name}`.toLowerCase() },
     h('span', { class: 'scope-badge', 'data-scope': v.name }),
-    h('label', { for: 'f-' + v.name, class: 'vlabel', title: v.name }, v.label || short2(v.name), v.label ? h('code', {}, v.name) : ''),
+    h('label', { for: 'f-' + v.name, class: 'vlabel', title: v.name }, v.label || short2(v.name), v.label ? h('code', {}, v.name) : '',
+      v.xp ? h('span', { class: 'xp-tag', title: v.xp === 'own' ? `A variable of ${st.xp} only` : `Edited for ${st.xp} only (Edit: "every XP" to change the shared variable)` }, v.xp === 'own' ? 'this XP only' : 'edited for this XP') : ''),
     h('div', { class: 'vval' }, h('div', { class: 'field-row' }, input, reset), extra ? h('div', { class: 'vextra' }, extra) : '', h('span', { class: 'src', 'data-src': v.name })),
     h('div', { class: 'chips' }, ...chips),
     h('div', { class: 'vact' },
@@ -893,13 +1012,13 @@ let shownVars = '';
 const varFilter = { text: '' };
 
 function drawVars() {
-  const all = GROUPS.flatMap(([g]) => cfg.variables[g]);
+  const all = GROUPS.flatMap(([g]) => xpVars(g));
   shownVars = all.filter(important).map((v) => v.name).join(',');
   const filter = h('input', { type: 'search', class: 'vfilter', placeholder: 'filter the variables (label, name)', value: varFilter.text, 'aria-label': 'Filter the variables' });
   filter.addEventListener('input', () => { varFilter.text = filter.value; applyFilter(); });
   $('#vars').replaceChildren(h('div', { class: 'vtools' }, filter, h('span', { class: 'hint' }, `${all.length} variables; the ones not used by this selection are folded`)),
     ...GROUPS.map(([g, title, note]) => {
-      const vars = cfg.variables[g];
+      const vars = xpVars(g);
       const main = vars.filter(important), rest = vars.filter((v) => !important(v));
       const more = rest.length ? h('details', { class: 'vmore' }, h('summary', {}, `${rest.length} more (defaults)`, h('span', { class: 'hint' }, ` ${rest.map((v) => v.label || short2(v.name)).join(', ')}`)),
         h('div', { class: 'vtable' }, ...rest.map((v) => varField(g, v)))) : '';
@@ -932,7 +1051,7 @@ function applyFilter() {
 
 function applyTable() {
   // a variable that this selection now uses (set by a block...) comes out of the folded ones, and back
-  const now = GROUPS.flatMap(([g]) => cfg.variables[g]).filter(important).map((v) => v.name).join(',');
+  const now = GROUPS.flatMap(([g]) => xpVars(g)).filter(important).map((v) => v.name).join(',');
   if (now !== shownVars && !document.querySelector('#vars textarea:focus')) drawVars();
   document.querySelectorAll('.field').forEach((f) => {
     const name = f.dataset.var, e = table[name], input = f.querySelector('textarea, input');
@@ -984,6 +1103,7 @@ function drawYaml(r) {
 
 let previewTimer;
 function schedulePreview() {
+  scheduleSaveValues();                           // an edited value changed (or not: nothing saved then)
   clearTimeout(previewTimer);
   previewTimer = setTimeout(async () => {
     if (!st.xp) { $('#preview').textContent = ''; return; }

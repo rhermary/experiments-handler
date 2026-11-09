@@ -6,7 +6,10 @@ A small web app to build, launch and analyse the experiments of a Python researc
 [jsonargparse](https://jsonargparse.readthedocs.io) and tracked with [MLflow](https://mlflow.org).
 
 - **Launcher**: an *XP* is a list of *blocks*; each block has *options* that set environment variables
-  (`APP_TASK__INIT_ARGS__LR=0.001`). Picking one option per block gives a shell script, generated from a template
+  (`APP_TASK__INIT_ARGS__LR=0.001`). The variables are shared by the XPs, but what you change in an XP stays in it:
+  a value typed in a field is saved with the XP (*reset* drops it), and Edit / Delete / + Add variable (and the
+  argument browser) change the selected XP only, unless *every XP* is chosen in Edit; such variables are tagged
+  *edited for this XP* or *this XP only*. Picking one option per block gives a shell script, generated from a template
   (typically: a docker container that checks out a commit and runs a command loop). The page shows the config the
   program will get, checks every variable against the classes of the source folder (ignored, overwritten, missing
   arguments), compares two selections (Diff), and can write base configs from scratch with an argument browser.

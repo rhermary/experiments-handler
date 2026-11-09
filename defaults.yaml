@@ -10,7 +10,9 @@
 # loop        options: command loops (shell text put at @@LOOP@@ in the template); env: variables set inside the
 #             loop at @@LOOP_ENV@@
 # servers     GPU servers of the GPU view (name, host, port, user), reached with ssh
-# xps         an XP: its ordered blocks (id, label, path: prefix of the variable names, rows: options setting variables)
+# xps         an XP: its ordered blocks (id, label, path: prefix of the variable names, rows: options setting variables);
+#             variables: its own edits of the variables (removed, edited fields, or variables of this XP only);
+#             values: the values edited in its fields (saved as you type)
 version: 3
 project:
   root: .

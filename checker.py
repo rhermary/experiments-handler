@@ -143,16 +143,16 @@ def setters(cfg, sel):
     """name -> [(source, value)] of every place that sets a variable, in the order they apply (the last one wins)."""
     prefix = cfg["project"]["env_prefix"]
     out = {}
-    for g in core.GROUPS:
-        for v in cfg["variables"][g]:
-            out.setdefault(v["name"], []).append(("variable default", v["value"]))
+    for lst in core.xp_variables(cfg, core.xp_of(cfg, sel.get("xp"))).values():
+        for v in lst:
+            out.setdefault(v["name"], []).append(("variable default" if not v["xp"] else "variable of this XP", v["value"]))
     for b in core.xp_of(cfg, sel.get("xp"))["blocks"]:
         row = core.pick(b["rows"], (sel.get("blocks") or {}).get(b["id"]), b["label"])
         for k, v in row["vars"].items():
             out.setdefault(core.full_name(b, k, prefix), []).append((f"{b['label']}: {row['name']}", v))
-    for name, v in (sel.get("values") or {}).items():
+    for name, v in (sel["values"] if "values" in sel else core.xp_of(cfg, sel.get("xp")).get("values") or {}).items():
         if name in out:
-            out[name].append(("session edit", str(v)))
+            out[name].append(("edited value", str(v)))
     return out
 
 
