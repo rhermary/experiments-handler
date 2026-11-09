@@ -646,9 +646,11 @@ def loop_vars(text):
     return list(dict.fromkeys(LOOP_VAR.findall(text)))
 
 
-def render(cfg, sel):
+def render(cfg, sel, workdir=None):
     """(script, variables, loop info). Variables: script ones become shell assignments, container ones -e flags,
-    loop ones (value uses a loop variable, or listed in loop.env) are set inside the loop at @@LOOP_ENV@@."""
+    loop ones (value uses a loop variable, or listed in loop.env) are set inside the loop at @@LOOP_ENV@@.
+    workdir: the folder the script runs from (@@WORKDIR@@; default: the project root here; for another server:
+    its copy of the project, remote_launch.py)."""
     table, header = collect(cfg, sel)
     tpl = read_template()
     if "@@SCALARS@@" in tpl or "@@COLUMNS@@" in tpl:
@@ -667,7 +669,7 @@ def render(cfg, sel):
         elif e["env"]:
             env.append(f'    -e "{name}={dq(v)}"')
     slots = {"SHELL_VARS": "\n".join(shell), "CONTAINER_ENV": "CONTAINER_ENV=(\n" + "\n".join(env) + "\n)",
-             "WORKDIR": shlex.quote(str(project_root(cfg)))}
+             "WORKDIR": shlex.quote(str(workdir or project_root(cfg)))}
     row = pick(cfg["loop"]["options"], sel.get("loop"), "command loops")
     header.append(f"# Command loop: {row['name']}")
     if loop_env and "@@LOOP_ENV@@" not in row["value"]:
@@ -725,14 +727,15 @@ def render(cfg, sel):
     return out, list(table.values()), info
 
 
-def generate(cfg, sel):
+def generate(cfg, sel, workdir=None, tag=""):
+    """Write the script of the selection into <scripts_dir>/<XP>/<time>[_<tag>].sh (tag: the server it is for)."""
     root = project_root(cfg)
     if not root.is_dir():
         raise ValueError(f"project root does not exist: {root}")
-    script, _, _ = render(cfg, sel)
+    script, _, _ = render(cfg, sel, workdir)
     folder = root / xp_dir(cfg, sel["xp"])
     folder.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S") + (f"_{slug(tag)}" if tag else "")
     path, n = folder / f"{stamp}.sh", 1
     while path.exists():
         n += 1

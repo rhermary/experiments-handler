@@ -22,6 +22,7 @@ import core
 import actions
 import diffview
 import remote
+import remote_launch
 import sync
 import xpqueue
 import gpus
@@ -466,16 +467,65 @@ def api_blocks_merge():
     return jsonify(config=public(core.save(cfg)))
 
 
+def _launch_target(cfg, sel):
+    """The server the selection is launched on (body "server": its name), or None for this machine."""
+    name = str(sel.get("server") or "")
+    if not name:
+        return None
+    sv = remote.server(cfg, name)
+    if sv.get("disabled"):
+        raise ValueError(f"{name} is disabled in the servers")
+    return sv
+
+
 @app.post("/api/generate")
 def api_generate():
+    """Write the script of the selection; body: the selection, and "server" for a script that runs there."""
     cfg = core.load()
-    return jsonify(path=_rel(cfg, core.generate(cfg, request.get_json(force=True))))
+    sel = request.get_json(force=True)
+    sv = _launch_target(cfg, sel)
+    path = core.generate(cfg, sel, remote_launch.workdir(sv), sv["name"]) if sv else core.generate(cfg, sel)
+    return jsonify(path=_rel(cfg, path), server=sv["name"] if sv else None)
+
+
+def _launch_remote(cfg, sel, sv):
+    """Launch on another server: the script is written here (a record), then copied there and run (remote_launch.py).
+    Waits LAUNCH_WAIT_S for the result; after that it goes on, and its result is in the actions of the server."""
+    table, _ = core.collect(cfg, sel)
+    remote_launch.check_selection(table)
+    if not remote.connected(sv):
+        raise ValueError(f"{sv['name']} is not connected: click Connect in Servers first")
+    path = core.generate(cfg, sel, remote_launch.workdir(sv), sv["name"])
+    config = (table.get(cfg["project"]["config_var"]) or {}).get("value", "").strip()
+    done = {}
+
+    def run():
+        try:
+            done["res"], done["folder"] = remote_launch.launch(cfg, sv, path.read_text(), sel["xp"], config,
+                                                                remote_launch.image_of(table))
+        except Exception as err:  # pylint: disable=broad-except  # shown in the page
+            done["error"] = f"{type(err).__name__}: {err}" if not isinstance(err, ValueError) else str(err)
+    worker = threading.Thread(target=run, daemon=True, name=f"launch-{sv['name']}")
+    worker.start()
+    worker.join(LAUNCH_WAIT_S)
+    if worker.is_alive():
+        return jsonify(path=_rel(cfg, path), server=sv["name"], running=True, output="")
+    if "error" in done:
+        return jsonify(error=done["error"]), 400
+    res = done["res"]
+    return jsonify(path=_rel(cfg, path), server=sv["name"], running=False, returncode=0 if res["ok"] else 1,
+                   output=remote_launch.output_of(res), action=res["id"], folder=done["folder"])
 
 
 @app.post("/api/launch")
 def api_launch():
+    """Write the script of the selection and run it: here, or on body "server" (remote_launch.py)."""
     cfg = core.load()
-    path = core.generate(cfg, request.get_json(force=True))
+    sel = request.get_json(force=True)
+    sv = _launch_target(cfg, sel)
+    if sv is not None:
+        return _launch_remote(cfg, sel, sv)
+    path = core.generate(cfg, sel)
     proc = subprocess.Popen(
         ["bash", str(path)], cwd=core.project_root(cfg), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, start_new_session=True,
@@ -607,11 +657,13 @@ def api_queue():
 
 @app.post("/api/queue/add")
 def api_queue_add():
-    """Queue the selection: body {sel, mode: auto | fixed, count}. Its script is written now, the devices at start."""
+    """Queue the selection: body {sel, mode: auto | fixed, count, manual, server (to run it there)}. Its script is
+    written now, the devices at start."""
     body = request.get_json(force=True)
     xpqueue.start_thread()
     try:
-        item = xpqueue.add(core.load(), body["sel"], body.get("mode") or "auto", body.get("count"), bool(body.get("manual")))
+        item = xpqueue.add(core.load(), body["sel"], body.get("mode") or "auto", body.get("count"), bool(body.get("manual")),
+                           str(body.get("server") or "") or None)
     except (ValueError, KeyError) as err:
         return jsonify(error=str(err)), 400
     return jsonify(item={k: v for k, v in item.items() if k != "script"}, queue=xpqueue.view())

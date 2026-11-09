@@ -1005,6 +1005,24 @@ function schedulePreview() {
   }, 150);
 }
 
+/* ---------- where the scripts run: this machine, or a server (remote_launch.py) ---------- */
+
+function runOn() { return $('#runon')?.value || ''; }
+
+async function fillRunOn() {
+  const sel = $('#runon');
+  if (!sel) return;
+  let list = [];
+  try { list = (await api('/api/servers')).servers || []; } catch (e) { return; }
+  let want = sel.value;
+  try { if (!sel.dataset.filled) want = localStorage.getItem('xp-run-on') || ''; } catch (e) { /* storage unavailable */ }
+  const servers = list.filter((s) => !s.disabled);
+  sel.replaceChildren(h('option', { value: '' }, 'this machine'),
+    ...servers.map((s) => h('option', { value: s.name }, s.name + (s.connected ? '' : ' (not connected)'))));
+  sel.value = servers.some((s) => s.name === want) ? want : '';
+  sel.dataset.filled = '1';
+}
+
 /* ---------- actions ---------- */
 
 async function act(kind) {
@@ -1012,13 +1030,16 @@ async function act(kind) {
   const buttons = [$('#generate'), $('#launch')];
   buttons.forEach((b) => (b.disabled = true));
   $('#output').hidden = true;
-  status(kind === 'launch' ? 'Launching...' : 'Writing script...');
+  const server = runOn();
+  const on = server ? ` on ${server}` : '';
+  status(kind === 'launch' ? `Launching${on}...` + (server ? ' (the project is copied there first when it changed)' : '') : `Writing script${server ? ` for ${server}` : ''}...`);
   try {
-    const r = await api('/api/' + kind, st);
+    const r = await api('/api/' + kind, { ...st, server });
     if (kind === 'generate') status(`Wrote ${r.path}`);
-    else if (r.running) status(`Wrote ${r.path}; still running (pid ${r.pid})`);
+    else if (r.running) status(server ? `Wrote ${r.path}; still launching on ${server}: its result will be in Servers > actions of ${server}`
+      : `Wrote ${r.path}; still running (pid ${r.pid})`);
     else {
-      status(`Wrote ${r.path}; exited with code ${r.returncode}`, r.returncode !== 0);
+      status(`Wrote ${r.path}; ${server ? `launched on ${server}, ` : ''}exited with code ${r.returncode}` + (r.folder ? ` (there: ${r.folder})` : ''), r.returncode !== 0);
       if (r.output.trim()) { $('#output').textContent = r.output; $('#output').hidden = false; }
     }
   } catch (e) {
@@ -1189,6 +1210,9 @@ $('#toggle').addEventListener('click', () => setCollapsed(!$('#app').classList.c
 $('#newxp').addEventListener('click', () => editXp(null));
 $('#generate').addEventListener('click', () => act('generate'));
 $('#launch').addEventListener('click', () => act('launch'));
+$('#runon').addEventListener('focus', fillRunOn);                 // the connections may have changed
+$('#runon').addEventListener('change', () => { try { localStorage.setItem('xp-run-on', runOn()); } catch (e) { /* storage unavailable */ } });
+fillRunOn();
 $('#reload').addEventListener('click', load);
 $('#settings').addEventListener('click', editSettings);
 $('#template').addEventListener('click', editTemplate);

@@ -80,6 +80,8 @@ pre { margin: 8px 0 0; padding: 12px; max-height: 420px; overflow: auto; backgro
 .bar { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 12px 24px; background: var(--panel); border-top: 1px solid var(--line); }
 #status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mute); }
 #status.err { color: var(--err); }
+.bar .runon { display: inline-flex; align-items: center; gap: 6px; color: var(--mute); font-size: 13px; }
+.bar .runon select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
 .bar button { padding: 8px 16px; border: 1px solid var(--line); border-radius: 6px; background: transparent; }
 .bar button.primary, dialog .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 button:disabled { opacity: .5; cursor: default; }

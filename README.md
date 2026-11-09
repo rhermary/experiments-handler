@@ -18,9 +18,16 @@ A small web app to build, launch and analyse the experiments of a Python researc
   explaining each view. Runs that use another run (e.g. a checkpoint) are linked to it, and what differs between those
   runs becomes dimensions. The Runs view shows the runs the filter leaves out (and why), and the block options that no
   run matches.
-- **Queue**: "Add to queue" writes the script of the current selection at once; the queue starts the items one after
-  the other on this machine, each when enough GPUs are free (or when you start them, on the GPUs you pick), and only
-  sets the devices variable (`…DEVICES`) then. It runs in the app (kept in `.queue.json` next to the settings).
+- **Run on** (next to Launch): this machine, or one of your servers (connected in Servers). On a server, the launch is
+  a logged action: it stops at once when the image (`IMAGE_NAME`) is not on that server (it is never pulled: pull it
+  yourself); the project is copied to `<launcher>/repo` there when it changed since the last copy (a
+  fingerprint of its files; what is copied: `project.snapshot`, else everything but what `.gitignore` excludes), with
+  the XP's base configs; the script is written to `<launcher>/launches/<time>_<XP>/run.sh`, runs from that copy,
+  and keeps its output in `output.log` next to it. One launch at a time per server; `DEBUG=1` only here.
+- **Queue**: "Add to queue" writes the script of the current selection at once, for where "Run on" points; the queue
+  starts the items one after the other, each when enough GPUs are free (or when you start them, on the GPUs you
+  pick), and only sets the devices variable (`…DEVICES`) then. Each server has its own line (the GPUs of another
+  server are read over ssh). It runs in the app (kept in `.queue.json` next to the settings).
 - **Servers** and **Databases**: your GPU servers (add, order, paths of each), one ssh connection per server opened
   when you click Connect, their state (Postgres, GPUs, disk), and the Postgres database of each server (start on a
   dated folder, stop, new dated database). Every action shows its commands before running them, and is logged with
@@ -144,6 +151,7 @@ Optional: `latex` and `dvisvgm` to show the LaTeX tables compiled; a LaTeX insta
 | `diffview.py`, `gpus.py`, `mlflow_ui.py` | Diff of two selections, GPU view, MLflow server (in a container) and its proxy |
 | `remote.py`, `actions.py` | servers and their databases over ssh; every action as a list of commands, shown first and logged |
 | `sync.py` | sync of a server's runs, artifacts and checkpoints into the central server's synchronised database |
+| `remote_launch.py` | launches on another server: the copy of the project there, the script, its output |
 | `sources.py` | the database read by the Results and MLflow tabs: local, or the synchronised one (its tunnel) |
 | `db/launch.sh`, `db/serve.sh` | a Postgres database and its MLflow UI in a container: copied to `<launcher>/db` on the server and run by Databases > Start (image chosen at each start) |
 | `xpqueue.py` | queue of experiments (frozen scripts, started when their GPUs are free) |
