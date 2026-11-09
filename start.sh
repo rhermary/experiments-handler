@@ -27,6 +27,8 @@
 #   <data>/.launcher/run/      (mode 700) the socket that lends your ssh agent to the container (agent_relay.py), and
 #                              the container's /etc/passwd (your home there: home/, where ssh looks for ~/.ssh)
 #   <data>/.launcher/bin/      the docker command (the launches run docker on the host, through its socket)
+# Also mounted: the socket folder of the local database (tracking_uri), and read-only, the runs' files on this
+# machine (each server's artifacts and checkpoints, own and synchronised, as Servers > paths say) for the MLflow UI.
 # The GPUs are given to the container (--gpus all, when the host's Docker has the NVIDIA runtime; LAUNCHER_GPUS=none
 # to skip): nothing runs on them, the GPU view and the queue read their state with nvidia-smi.
 # The container runs as you. Its port is published on the server as the database containers' are (-p): port 5925,
@@ -98,8 +100,10 @@ while (( i < ${#argv[@]} )); do
 done
 
 # from the settings: the image (line 1), what to copy of the project (line 2), the folders of the local database
-# (line 3: the socket folder of a Postgres, the folder of a SQLite file; mounted in the container)
-mapfile -t conf < <("$py" - "$data/experiments.yaml" <<'EOF'
+# (line 3: the socket folder of a Postgres, the folder of a SQLite file; mounted in the container), the folders of the
+# runs' files on this machine (line 4: artifacts and checkpoints of the servers, own and synchronised, as Servers >
+# paths say, when they exist here; mounted read-only: the MLflow UI reads the artifacts from them)
+mapfile -t conf < <("$py" - "$data/experiments.yaml" "$handler" <<'EOF'
 import sys, yaml
 cfg = yaml.safe_load(open(sys.argv[1])) or {}
 p = cfg.get("project") or {}
@@ -115,12 +119,23 @@ dirs = [h for v in urllib.parse.parse_qs(parts.query).get("host", []) for h in v
 if parts.scheme.startswith("sqlite") and ":///" in uri:
     dirs.append(os.path.dirname(os.path.abspath(uri.split(":///", 1)[1].split("?")[0])))
 print(" ".join(sorted(set(dirs))))
+sys.path.insert(0, sys.argv[2])
+import core                                     # server_paths: the paths of a server, defaults included
+files = set()
+for sv in cfg.get("servers") or []:
+    if "name" not in sv or sv.get("disabled"):
+        continue
+    sp = core.server_paths(sv)
+    files.update(sp[k] for k in ("artifacts", "checkpoints", "sync_artifacts", "sync_checkpoints") if os.path.isdir(sp[k]))
+files = sorted(files)
+print(" ".join(f for f in files if not any(f != g and f.startswith(g.rstrip("/") + "/") for g in files)))
 EOF
 )
 image="${LAUNCHER_IMAGE:-${conf[0]:-}}"
 snapshot="${conf[1]:-}"
 volumes=()
 for v in ${conf[2]:-} ${LAUNCHER_VOLUMES:-}; do volumes+=(--volume "$v:$v"); done      # LAUNCHER_VOLUMES: more folders
+for v in ${conf[3]:-}; do volumes+=(--volume "$v:$v:ro"); done
 
 if ! $container || [[ -z "$image" ]]; then
     cd "$root"
