@@ -27,6 +27,8 @@
 #   <data>/.launcher/run/      (mode 700) the socket that lends your ssh agent to the container (agent_relay.py), and
 #                              the container's /etc/passwd (your home there: home/, where ssh looks for ~/.ssh)
 #   <data>/.launcher/bin/      the docker command (the launches run docker on the host, through its socket)
+# The GPUs are given to the container (--gpus all, when the host's Docker has the NVIDIA runtime; LAUNCHER_GPUS=none
+# to skip): nothing runs on them, the GPU view and the queue read their state with nvidia-smi.
 # The container runs as you. Its port is published on the server as the database containers' are (-p): port 5925,
 # on every interface: http://<server>:5925. Nothing asks who you are, and the launcher can run commands on your
 # servers and has the host's Docker (root on this server): anyone who reaches that port can do the same.
@@ -193,11 +195,16 @@ if $attach; then
     (until docker inspect "$name" >/dev/null 2>&1; do sleep 0.2; done; start_relay) &
 fi
 
+gpus=()
+if [[ "${LAUNCHER_GPUS:-auto}" != none ]] && docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q nvidia; then
+    gpus=(--gpus all)
+fi
+
 out=/dev/null                                               # detached: docker prints only the container id
 if $attach; then out=/dev/stdout; fi
 echo "launcher in a container of $image ($name)"
 # detached: no --rm, so that "start.sh logs" still shows why it stopped (the next start removes it)
-docker run "${mode[@]}" --init --pull never --name "$name" --publish "$bind:$port:8000" \
+docker run "${mode[@]}" --init --pull never --name "$name" --publish "$bind:$port:8000" "${gpus[@]}" \
     --user "$(id -u):$(id -g)" --group-add "$docker_gid" \
     --volume "$state/run/passwd:/etc/passwd:ro" --volume /etc/group:/etc/group:ro \
     --volume "$data:$data" --volume /var/run/docker.sock:/var/run/docker.sock \
