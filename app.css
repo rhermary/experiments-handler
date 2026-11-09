@@ -716,6 +716,9 @@ dialog.queuedlg { width: min(1000px, 96vw); }
 
 /* list blocks */
 .tag.list { color: var(--accent); border-color: var(--accent); }
+.tag.fixed { color: var(--accent); border-color: var(--accent); }
+#strip .strip-sep { flex: 0 0 auto; align-self: stretch; width: 0; margin: 4px 6px; border-left: 2px solid var(--line); }
+.card .fixed-vars { margin-top: 2px; }
 .item.loop-all .row { border-style: dashed; }
 .item.loop-all .row .name::before { content: "\21BB  "; color: var(--accent); }
 

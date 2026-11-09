@@ -14,7 +14,9 @@ A small web app to build, launch and analyse the experiments of a Python researc
   program will get, checks every variable against the classes of the source folder (ignored, overwritten, missing
   arguments), compares two selections (Diff), and can write base configs from scratch with an argument browser.
   A *list* block holds values (run ids, window sizes...): pick one or several, or loop over all of them around the
-  command loop. Every view has its own address (bookmark it, open it in another tab).
+  command loop. Every XP has a *fixed* block, "All Runs", first and set apart: one option, applied to every run of
+  the XP, for adjustments of the base config when the task has no config of its own in the repo (the blocks after
+  it still win). Every view has its own address (bookmark it, open it in another tab).
 - **Results**: the MLflow runs of an XP, labelled by *dimensions* (from the blocks, or MLflow filters), shown as a table,
   dot plots and a list of runs, with a report script (LaTeX table, PDF figures) that queries MLflow itself. Several
   *selections* per XP (filter, values kept, rows and columns), each with its own *views* and a text explaining each

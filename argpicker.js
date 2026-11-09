@@ -29,10 +29,10 @@
 
   function targets() {
     const gen = genConfig();
-    const t = [['auto', `where it is set now (new: ${gen ? 'the base config file' : 'Process variables'})`],
-      ...(gen ? [['file', `the base config file (${gen})`]] : []),
-      ['process', 'Process variables (all XPs)'], ['session', 'this session only (not saved)']];
-    for (const b of xpDef()?.blocks || []) t.push([`block:${b.id}`, `option "${st.blocks[b.id]}" of block ${b.label}`]);
+    const t = [['auto', `Where it is set now (new: ${gen ? 'the base config file' : 'a process variable of this XP'})`],
+      ...(gen ? [['file', `The base config file (${gen})`]] : []),
+      ['process', 'A process variable of this XP (the other XPs keep theirs)'], ['session', 'An edited value of this XP (saved with it; reset drops it)']];
+    for (const b of xpDef()?.blocks || []) t.push([`block:${b.id}`, b.kind === 'fixed' ? `Block ${b.label} (every run)` : `Option "${st.blocks[b.id]}" of block ${b.label}`]);
     return t;
   }
 

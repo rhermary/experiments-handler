@@ -84,6 +84,8 @@ HEADER_COMMENT = """\
 # servers     GPU servers for the GPU view (name, host, port, user); reached with ssh
 # xps         name + its own ordered list of blocks: id, label, path (env-var prefix), rows;
 #             a row sets variables {key: value}. Blocks are not shared between XPs.
+#             kind: fixed -> one option (rows: [{name, vars}]) applied to every run (adjustments of the base config):
+#             every XP has one, first (added when missing);
 #             kind: list -> var, items [{value, label}], vars (built from $VAR), loop: the options are one per value,
 #             and "all (N)" that runs the command loop once per value (for var.lower() in values).
 #             variables (optional): this XP's variables on top of the shared ones: {NAME: {removed: true}},
@@ -224,6 +226,7 @@ def normalize(raw):
             if not isinstance(b, dict):
                 raise ValueError(f"XP '{name}': a block must be a mapping (id, label, path, rows), got {b!r}")
             blocks.append(_block(b, name, ids, prefix))
+        blocks = _with_fixed(blocks, name, ids)
         res = x.get("results") or {}
         results = {k: v for k, v in (("experiment", _text(res.get("experiment")).strip()),
                                      ("dimensions", _dimensions(res.get("dimensions"), name))) if v}
@@ -481,6 +484,12 @@ def _block(b, xp, ids, prefix):
     where = f"XP '{xp}', block '{block['label']}'"
     if b.get("kind") == "list":
         return _list_block(b, block, where, prefix)
+    fixed = b.get("kind") == "fixed"                        # one option, applied to every run of the XP
+    if fixed:
+        block["kind"] = "fixed"
+        if len(b.get("rows") or []) > 1:
+            raise ValueError(f"{where} is fixed (applied to every run): it has one option only")
+        b = {**b, "rows": b.get("rows") or [{"name": "always", "vars": {}}]}
     names = set()
     for r in b.get("rows") or []:
         name = _text(r.get("name")).strip()
@@ -499,6 +508,25 @@ def _block(b, xp, ids, prefix):
     if not block["rows"]:
         raise ValueError(f"{where} needs at least one option")
     return block
+
+
+FIXED_LABEL = "All Runs"
+
+
+def _with_fixed(blocks, xp, ids):
+    """Every XP has one fixed block (its variables applied to every run), first: added (empty) when missing."""
+    fixed = [b for b in blocks if b.get("kind") == "fixed"]
+    if len(fixed) > 1:
+        raise ValueError(f"XP '{xp}' has {len(fixed)} fixed blocks: it has one ({', '.join(b['label'] for b in fixed)})")
+    if fixed and fixed[0]["label"] == "All runs":            # the first name it had
+        fixed[0]["label"] = FIXED_LABEL
+    if not fixed:
+        bid, n = "all_runs", 2
+        while bid in ids:
+            bid, n = f"all_runs_{n}", n + 1
+        ids.add(bid)
+        fixed = [{"id": bid, "label": FIXED_LABEL, "path": "", "rows": [{"name": "always", "vars": {}}], "kind": "fixed"}]
+    return fixed + [b for b in blocks if b.get("kind") != "fixed"]
 
 
 def xp_of(cfg, name):

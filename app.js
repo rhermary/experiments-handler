@@ -147,6 +147,7 @@ async function commit(mutate, { after, deleted, done } = {}) {
 function editXp(oldName) {
   const fields = [{ key: 'name', label: 'XP name', value: oldName ?? '' }];
   if (oldName == null && st.xp) fields.push({ key: 'copy', label: `Start with a copy of the blocks of "${st.xp}"`, type: 'check', value: true });
+  if (oldName == null) fields.push({ type: 'note', label: 'The XP starts with its fixed block "All Runs" (variables applied to every run): a copy of the one of the copied XP, else empty.' });
   openDialog({
     title: oldName == null ? 'New XP' : `Rename "${oldName}"`,
     fields,
@@ -155,7 +156,9 @@ function editXp(oldName) {
       if (!name) throw new Error('Name is required');
       const from = st.xp;
       await commit((c) => {
-        if (oldName == null) c.xps.push({ name, blocks: v.copy && from ? clone(c.xps.find((x) => x.name === from).blocks) : [] });
+        if (oldName == null) {
+          c.xps.push({ name, blocks: v.copy && from ? clone(c.xps.find((x) => x.name === from).blocks) : [] });   // the server adds the fixed block when missing
+        }
         else c.xps.find((x) => x.name === oldName).name = name;
       }, { after: () => { st.xp = name; } });
     },
@@ -231,13 +234,16 @@ function checker(bid, name) {
 function editOption(bid, name) {
   const b = blk(bid);
   if (b.kind === 'list') { editListBlock(bid); return; }      // its options come from the list
+  const fixed = b.kind === 'fixed';
+  if (fixed) name = b.rows[0].name;                           // its one option
   const row = name == null ? null : b.rows.find((r) => r.name === name);
   const onChange = checker(bid, name);
   openDialog({
-    title: name == null ? `Add option to "${b.label}"` : `Edit "${name}"`,
+    title: fixed ? `"${b.label}": variables applied to every run of ${st.xp}` : name == null ? `Add option to "${b.label}"` : `Edit "${name}"`,
     wide: true,
     fields: [
-      { key: 'name', label: 'Name', value: row?.name ?? '' },
+      fixed ? { type: 'note', label: 'A fixed block: these variables are set for every run of this XP (e.g. adjustments of the base config that are not in a config file of the repo). The blocks after it can still override them.' }
+        : { key: 'name', label: 'Name', value: row?.name ?? '' },
       { key: 'vars', type: 'pairs', label: 'Variables set by this option', value: Object.entries(row?.vars ?? {}).map(([k, x]) => [k, row.pretty?.[k] ?? x]),
         keyPlaceholder: b.path ? 'name after the block path' : `${prefix()}... or a script variable`,
         resolve: (k) => (fullName(b, k) !== k ? '-> ' + fullName(b, k) : ''),
@@ -254,7 +260,7 @@ function editOption(bid, name) {
           + 'Each variable is checked against the base config and the classes in src/ with the other blocks as selected.' },
     ],
     onSubmit: async (v) => {
-      const nm = v.name.trim();
+      const nm = fixed ? name : v.name.trim();
       if (!nm) throw new Error('Name is required');
       await commit((c) => {
         const rows = blkIn(c, bid).rows;
@@ -262,7 +268,7 @@ function editOption(bid, name) {
         if (name == null) rows.push(nr); else rows[rows.findIndex((r) => r.name === name)] = nr;
       }, { after: () => { st.blocks[bid] = nm; } });
     },
-    remove: name == null ? null : async () => {
+    remove: name == null || fixed ? null : async () => {
       await commit((c) => { const rows = blkIn(c, bid).rows; rows.splice(rows.findIndex((r) => r.name === name), 1); }, { deleted: `option "${name}"` });
     },
   });
@@ -281,8 +287,9 @@ function editBlock(bid) {
         placeholder: `${prefix()}TASK__INIT_ARGS__MODEL__INIT_ARGS__EXTRACTOR__INIT_ARGS__LLM__`,
         hint: 'Variables of its options are relative to this path. Leave empty to use full names.' },
       { type: 'note', label: `This block belongs to "${st.xp}" only: other XPs have their own copies.` },
-      ...(xpDef().blocks.length > 1 ? [{ key: 'merge', type: 'select', label: 'Merge with another block (one option per combination; delete the ones you do not need)', value: '',
-        options: [{ value: '', label: '- no -' }, ...xpDef().blocks.filter((x) => x.id !== bid).map((x) => ({ value: x.id, label: `${x.label} (${x.rows.length} options)` }))] }] : []),
+      ...(b.kind === 'fixed' ? [{ type: 'note', label: 'A fixed block: its one option is applied to every run (Edit on the card for its variables).' }] : []),
+      ...(b.kind !== 'fixed' && xpDef().blocks.filter((x) => x.kind !== 'fixed').length > 1 ? [{ key: 'merge', type: 'select', label: 'Merge with another block (one option per combination; delete the ones you do not need)', value: '',
+        options: [{ value: '', label: '- no -' }, ...xpDef().blocks.filter((x) => x.id !== bid && x.kind !== 'fixed').map((x) => ({ value: x.id, label: `${x.label} (${x.rows.length} options)` }))] }] : []),
     ],
     onSubmit: async (v) => {
       if (!v.label.trim()) throw new Error('Name is required');
@@ -353,8 +360,9 @@ function addBlock() {
   const sources = [];
   cfg.xps.forEach((x, xi) => {
     if (!x.blocks.length) return;
-    if (x.name !== st.xp && x.blocks.length > 1) sources.push({ value: `${xi}:*`, label: `${x.name}: all ${x.blocks.length} blocks` });
-    x.blocks.forEach((b) => sources.push({ value: `${xi}:${b.id}`, label: `${x.name} / ${b.label}  (${b.rows.length} option${b.rows.length === 1 ? '' : 's'})` }));
+    const others = x.blocks.filter((b) => b.kind !== 'fixed');
+    if (x.name !== st.xp && others.length > 1) sources.push({ value: `${xi}:*`, label: `${x.name}: all ${others.length} blocks (not its fixed one)` });
+    others.forEach((b) => sources.push({ value: `${xi}:${b.id}`, label: `${x.name} / ${b.label}  (${b.rows.length} option${b.rows.length === 1 ? '' : 's'})` }));
   });
   const fields = [];
   if (sources.length) {
@@ -383,7 +391,7 @@ function addBlock() {
         }
         const [xi, bid] = [Number(v.source.split(':')[0]), v.source.slice(v.source.indexOf(':') + 1)];
         const from = c.xps[xi].blocks;
-        for (const b of bid === '*' ? from : from.filter((x) => x.id === bid)) {
+        for (const b of (bid === '*' ? from : from.filter((x) => x.id === bid)).filter((x) => x.kind !== 'fixed')) {   // the XP has its own fixed block
           const copy = clone(b);
           if (bid !== '*' && v.label.trim()) copy.label = v.label.trim();
           copy.id = uniqueId(xp.blocks, copy.label);
@@ -524,7 +532,7 @@ function blockVars(b) {
   const row = b.rows.find((r) => r.name === rowName);
   const mine = `${b.label}: ${rowName}`;
   const entries = Object.entries(row?.vars || {});
-  if (!entries.length) return [h('p', { class: 'hint' }, 'sets nothing')];
+  if (!entries.length) return [h('p', { class: 'hint' }, b.kind === 'fixed' ? 'Nothing yet: Edit to set the variables every run of this XP needs (e.g. what the base config lacks).' : 'Sets nothing')];
   return entries.map(([k, raw]) => {
     const full = fullName(b, k), e = table[full], c = checks[full];
     const over = e && e.source !== mine;
@@ -769,18 +777,20 @@ async function editTemplate() {
 
 /* ---------- drawing ---------- */
 
-function pickerCard({ bid, label, tag, list, rows, selected, onPick, onAdd, onEdit, onBlock, onRemove, onDiff, footer, body }) {
+function pickerCard({ bid, label, tag, list, fixed, rows, selected, onPick, onAdd, onEdit, onBlock, onRemove, onDiff, footer, body }) {
   return h('div', { class: 'card', 'data-bid': bid ?? '' },
     h('div', { class: 'card-head' },
-      bid ? h('span', { class: 'grip', draggable: 'true', tabindex: '0', role: 'button', 'data-grip': bid, 'aria-label': `Move the block ${label}`,
+      bid && !fixed ? h('span', { class: 'grip', draggable: 'true', tabindex: '0', role: 'button', 'data-grip': bid, 'aria-label': `Move the block ${label}`,
         title: 'Drag to move this block (or focus it and use the arrow keys). Order matters: a later block overrides the variables an earlier one sets.' }, '⠿') : '',
       h('h3', { title: label }, label),
-      tag ? h('span', { class: 'tag', title: tag }, 'path') : '',
-      list ? h('span', { class: 'tag list', title: 'A list block: one option per value, and "all" loops over them' }, 'list') : '',
-      h('button', { class: 'tiny', type: 'button', title: list ? 'Edit the values of the list' : 'Add an option', onclick: onAdd }, list ? 'Values' : 'Add'),
+      tag ? h('span', { class: 'tag', title: tag }, 'Path') : '',
+      list ? h('span', { class: 'tag list', title: 'A list block: one option per value, and "all" loops over them' }, 'List') : '',
+      fixed ? h('span', { class: 'tag fixed', title: 'The fixed block of the XP: its variables are applied to every run (always there, first; the blocks after it still win)' }, 'Every run') : '',
+      fixed ? h('button', { class: 'tiny', type: 'button', title: 'Edit the variables applied to every run', onclick: () => onEdit(rows[0].name) }, 'Edit')
+        : onAdd ? h('button', { class: 'tiny', type: 'button', title: list ? 'Edit the values of the list' : 'Add an option', onclick: onAdd }, list ? 'Values' : 'Add') : '',
       onDiff && rows.length > 1 ? h('button', { class: 'tiny', type: 'button', title: 'Compare two options of this block: the variables and the config they give', onclick: onDiff }, 'Diff') : '',
       onBlock ? h('button', { class: 'tiny', type: 'button', title: 'Rename the block or change its path', onclick: onBlock }, 'Block') : '',
-      onRemove ? h('button', { class: 'tiny', type: 'button', title: 'Remove this block from the XP', onclick: onRemove }, 'Remove') : ''),
+      onRemove && !fixed ? h('button', { class: 'tiny', type: 'button', title: 'Remove this block from the XP', onclick: onRemove }, 'Remove') : ''),
     body || h('div', { class: 'rows' },
       ...rows.map((r) => h('div', { class: 'item' + (r.loop ? ' loop-all' : ''), 'data-row': r.name, title: r.loop ? 'Runs the command loop once per value of the list' : null },
         h('button', { class: 'row', type: 'button', title: r.preview || '(empty)', 'aria-pressed': String(r.name === selected), onclick: () => onPick(r.name) },
@@ -947,16 +957,18 @@ function drawStrip() {
   for (const b of xp?.blocks || []) {
     const bid = b.id;
     cards.push(pickerCard({
-      bid, label: b.label, tag: b.path, list: b.kind === 'list', selected: st.blocks[bid],
+      bid, label: b.label, tag: b.path, list: b.kind === 'list', fixed: b.kind === 'fixed', selected: st.blocks[bid],
       rows: b.rows.map((r) => ({ name: r.name, preview: Object.entries(r.vars).map(([k, v]) => `${k}=${v}`).join('\n'),
         norun: noRunOf.get(`${bid}\u0000${r.name}`), loop: !!r.loop_all })),
       onPick: (name) => { st.blocks[bid] = name; draw(); },
-      onAdd: () => editOption(bid, null), onEdit: (name) => editOption(bid, name),
+      onAdd: b.kind === 'fixed' ? null : () => editOption(bid, null), onEdit: (name) => editOption(bid, name),
       onBlock: () => editBlock(bid), onRemove: () => removeBlock(bid), onDiff: () => diffDialog(bid),
-      body: b.kind === 'list' ? listBody(b) : null,
-      footer: h('div', { class: 'card-vars', 'data-bid': bid, 'aria-label': `Variables set by ${b.label}` }, ...blockVars(b)),
+      body: b.kind === 'list' ? listBody(b)
+        : b.kind === 'fixed' ? h('div', { class: 'card-vars fixed-vars', 'data-bid': bid, 'aria-label': `Variables applied to every run by ${b.label}` }, ...blockVars(b)) : null,
+      footer: b.kind === 'fixed' ? null : h('div', { class: 'card-vars', 'data-bid': bid, 'aria-label': `Variables set by ${b.label}` }, ...blockVars(b)),
     }));
   }
+    if (b.kind === 'fixed') cards.push(h('div', { class: 'strip-sep', role: 'separator', title: 'Left: applied to every run. Right: the blocks whose options you pick.' }));
   if (xp) cards.push(h('button', { class: 'addblock', type: 'button', onclick: addBlock }, '+ Add block'));
   else cards.push(h('div', { class: 'empty' }, 'No XP yet. Create one in the side panel.'));
   const strip = $('#strip');
