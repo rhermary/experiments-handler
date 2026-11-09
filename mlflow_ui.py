@@ -256,6 +256,10 @@ def proxy(flask_request, path):
     url = f"http://127.0.0.1:{_STATE['port']}{PREFIX}/{path}"
     headers = {k: v for k, v in flask_request.headers if k.lower() not in HOP}
     headers["Host"] = f"127.0.0.1:{_STATE['port']}"
+    # the page is the launcher's (same origin as this proxy): MLflow (3.5+) refuses a request whose Origin is not its
+    # own (403 "Blocked cross-origin request"), e.g. http://<server>:5925 when the launcher is reached by its address
+    for k in [k for k in headers if k.lower() in ("origin", "referer")]:
+        headers[k] = f"http://127.0.0.1:{_STATE['port']}" + ("/" if k.lower() == "referer" else "")
     r = requests.request(flask_request.method, url, params=flask_request.args, data=flask_request.get_data(),
                          headers=headers, stream=True, allow_redirects=False, timeout=120)
     out = [(k, v) for k, v in r.raw.headers.items() if k.lower() not in HOP]
