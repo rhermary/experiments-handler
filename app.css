@@ -943,3 +943,12 @@ header #reload { padding: 5px 12px; font-size: 13px; border-radius: 8px; }
 .rs-art-img { display: block; background: #fff; border-radius: 4px; }
 .rs-art-img img { display: block; width: 100%; height: auto; }
 .rs-art-text { margin: 0; max-height: 360px; overflow: auto; font-size: 11px; white-space: pre; }
+
+/* Jobs (jobs.js): your containers on this machine and the servers */
+.j-place { display: grid; gap: 6px; margin-top: 10px; }
+.j-place h4 { margin: 0; font-size: 14px; }
+.j-place.off h4 { color: var(--mute); }
+.j-main { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; }
+@media (max-width: 700px) { .j-main { grid-template-columns: minmax(0, 1fr); } }
+.j-cmd { font-family: ui-monospace, monospace; }
+.j-logs { margin: 0; max-height: 360px; overflow: auto; padding: 8px; border-radius: 6px; background: var(--code); font-size: 11px; white-space: pre-wrap; }

@@ -27,6 +27,7 @@ import remote_launch
 import sync
 import xpqueue
 import gpus
+import jobs
 import mlflow_ui
 import picker
 import preview
@@ -35,7 +36,7 @@ import sources
 import xpconfigs
 
 LAUNCH_WAIT_S = 30  # how long a launch waits for the script before reporting "still running"
-PAGES = {"index.html", "app.js", "editors.js", "argpicker.js", "gpus.js", "results.js", "router.js", "queue.js", "servers.js", "app.css", "favicon.svg", "favicon.ico", "apple-touch-icon.png"}
+PAGES = {"index.html", "app.js", "editors.js", "argpicker.js", "gpus.js", "results.js", "router.js", "queue.js", "servers.js", "jobs.js", "app.css", "favicon.svg", "favicon.ico", "apple-touch-icon.png"}
 
 app = Flask(__name__, static_folder=None)
 app.json.sort_keys = False  # key order matters (order of variables, XPs, options)
@@ -675,6 +676,31 @@ def api_action(action_id):
         return jsonify(actions.read(action_id))
     except ValueError as err:
         return jsonify(error=str(err)), 404
+
+
+@app.get("/api/jobs")
+def api_jobs():
+    """Your containers running here and on the connected servers (jobs.py)."""
+    return jsonify(jobs.listing(core.load()))
+
+
+@app.post("/api/jobs/logs")
+def api_jobs_logs():
+    """The last lines of a job's output: body {server (none: this machine), id}."""
+    body = request.get_json(force=True)
+    return jsonify(text=jobs.logs(core.load(), str(body.get("server") or ""), str(body.get("id") or "")))
+
+
+@app.post("/api/jobs/stop")
+def api_jobs_stop():
+    """Stop a job: body {server, id, dry}. dry: the command it would run; else run it (logged as an action)."""
+    body = request.get_json(force=True)
+    server = str(body.get("server") or "")
+    where, steps = jobs.stop_steps(core.load(), server, str(body.get("id") or ""))
+    if body.get("dry"):
+        return jsonify(plan=actions.plan(steps))
+    res = actions.run("job_stop", server or "local", f"{where}: stop the job {body.get('id')}", steps)
+    return jsonify(ok=res["ok"], output=(res["steps"][0]["out"] + res["steps"][0]["err"]).strip(), action=res["id"])
 
 
 @app.get("/api/queue")

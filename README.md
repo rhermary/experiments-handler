@@ -33,6 +33,9 @@ A small web app to build, launch and analyse the experiments of a Python researc
   starts the items one after the other, each when enough GPUs are free (or when you start them, on the GPUs you
   pick), and only sets the devices variable (`…DEVICES`) then. Each server has its own line (the GPUs of another
   server are read over ssh). It runs in the app (kept in `.queue.json` next to the settings).
+- **Jobs** (side panel): your containers running on this machine and on the connected servers (the ones running as
+  you, the launcher's own left out): XP, GPUs, image, how long, the launch that started it, its last output, and
+  Stop (docker stop, asked twice, logged as an action).
 - **Servers** and **Databases**: your GPU servers (add, order, paths of each), one ssh connection per server opened
   when you click Connect, their state (Postgres, GPUs, disk), and the Postgres database of each server (start on a
   dated folder, stop, new dated database). Every action shows its commands before running them, and is logged with
@@ -157,6 +160,7 @@ Optional: `latex` and `dvisvgm` to show the LaTeX tables compiled; a LaTeX insta
 | `remote.py`, `actions.py` | servers and their databases over ssh; every action as a list of commands, shown first and logged |
 | `sync.py` | sync of a server's runs, artifacts and checkpoints into the central server's synchronised database |
 | `remote_launch.py` | launches on another server: the copy of the project there, the script, its output |
+| `jobs.py`, `jobs.js` | Jobs: your running containers here and on the connected servers, their output, Stop |
 | `sources.py` | the database read by the Results and MLflow tabs: local, or the synchronised one (its tunnel) |
 | `db/launch.sh`, `db/serve.sh` | a Postgres database and its MLflow UI in a container: copied to `<launcher>/db` on the server and run by Databases > Start (image chosen at each start) |
 | `xpqueue.py` | queue of experiments (frozen scripts, started when their GPUs are free) |
