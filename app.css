@@ -535,7 +535,7 @@ dialog .pk-head button.primary { border-color: var(--accent); }
 
 /* GPUs: every server at once */
 .gt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
-.gt { display: grid; gap: 4px; align-content: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); text-align: left; color: var(--ink); font: inherit; cursor: pointer; }
+.gt { display: grid; gap: 4px; align-content: start; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); text-align: left; color: var(--ink); font: inherit; cursor: pointer; }
 .gt:hover, .gt:focus-visible { border-color: var(--accent); }
 .gt.bad { cursor: default; border-style: dashed; opacity: .8; }
 .gt-head { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
@@ -550,7 +550,7 @@ dialog .pk-head button.primary { border-color: var(--accent); }
 .gt-idx { color: var(--mute); }
 .gt-mem, .gt-util { font-size: 11px; color: var(--mute); text-align: right; }
 .gt-users { display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
-.gt-user { padding: 0 6px; border-radius: 999px; background: var(--code); font-size: 11px; white-space: nowrap; }
+.gt-user { max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; border-radius: 999px; background: var(--code); font-size: 11px; white-space: nowrap; }
 .gt-err { margin: 0; font-size: 12px; color: var(--err); overflow-wrap: anywhere; }
 .gt-foot { font-size: 11px; }
 dialog.gpudlg { width: min(1300px, 97vw); }

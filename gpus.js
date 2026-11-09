@@ -67,7 +67,7 @@
         bar(used, used > 0.9 ? 'hot' : 'mem'),
         h('span', { class: 'gt-mem mono' }, `${MiBs(g.mem_used)}/${MiBs(g.mem_total)}`),
         h('span', { class: 'gt-util mono' }, g.util == null ? '' : `${g.util}%`),
-        h('span', { class: 'gt-users' }, ...(Object.keys(users).length ? Object.entries(users).map(([u, n]) => h('span', { class: 'gt-user' }, n > 1 ? `${u} ×${n}` : u)) : [h('span', { class: 'hint' }, isFree ? 'free' : '')])));
+        h('span', { class: 'gt-users' }, ...(Object.keys(users).length ? Object.entries(users).map(([u, n]) => h('span', { class: 'gt-user', title: n > 1 ? `${u}: ${n} processes` : u }, n > 1 ? `${u} ×${n}` : u)) : [h('span', { class: 'hint' }, isFree ? 'free' : '')])));
     });
     return h('button', { type: 'button', class: 'gt', title: `Open ${sv.server}`, onclick: () => pick(sv.server) }, head, ...lines,
       h('div', { class: 'gt-foot hint' }, `${sv.hostname || ''} · ${sv.ms} ms`));
