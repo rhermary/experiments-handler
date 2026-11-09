@@ -103,13 +103,15 @@ userlist.csv
 EOF
 fi
 # the forwarder: tools/experiments/start.sh as before
-cat > "$data/start.sh" <<'EOF'
-#!/usr/bin/env bash
-# Written by experiments-handler/init.sh: the launcher's start script is tools/experiments-handler/start.sh.
-# (the folder as reached, tools/experiments: a link; "/.." would go to the parent of the folder it points to)
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "${here%/*}/experiments-handler/start.sh" "$@"
-EOF
+{
+    echo '#!/usr/bin/env bash'
+    echo '# Written by experiments-handler/init.sh: the launcher'"'"'s start script is tools/experiments-handler/start.sh, found'
+    echo '# next to the folder as reached (tools/experiments, a link), else where init.sh was run from (this real folder).'
+    echo 'here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"'
+    echo 'start="${here%/*}/experiments-handler/start.sh"'
+    printf '[[ -f "$start" ]] || start=%q\n' "$handler/start.sh"
+    echo 'exec "$start" "$@"'
+} > "$data/start.sh"
 chmod +x "$data/start.sh"
 
 # can start.sh run the launcher in a container from here?
