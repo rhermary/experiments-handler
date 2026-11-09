@@ -7,7 +7,7 @@
    it is precomputed, it can be run again later. The server writes and runs it; the page never sends code.
    Depends on editors.js ($, h, api, status, openDialog, openChooser, autoGrow) and app.js (cfg, st, blk, commit, draw). */
 (() => {
-  const R = { data: null, error: '', loading: false, tab: 'launcher', out: {}, view: 'table', sel: null, source: null, switching: false };
+  const R = { data: null, error: '', loading: false, tab: 'launcher', out: {}, view: 'table', sel: null, source: null, switching: false, switchError: '' };
   const selq = () => ({ ...st, selection: R.sel });     // the launcher's selection + the results selection shown
   const OTHER = '(other)';
   try { R.view = localStorage.getItem('xp-results-view') || 'table'; } catch (e) { /* storage unavailable */ }
@@ -916,6 +916,11 @@
       R.data ? h('span', { class: 'hint' }, `${R.data.config.experiment}: ${R.data.runs.length} runs from the filter`) : '',
       h('span', { class: 'sp' }), sourceSwitch(),
       h('button', { type: 'button', class: 'ghost', onclick: () => { R.out = {}; load(true); } }, R.loading ? 'Loading...' : 'Refresh'));
+    if (R.switchError) {
+      box.replaceChildren(head, switchNote(), h('button', { type: 'button', class: 'ghost', onclick: () => { R.switchError = ''; load(true); } },
+        `Show the runs of the ${R.source?.label || 'database'} instead`));
+      return;
+    }
     if (R.error) { box.replaceChildren(head, h('pre', { class: 'dlg-err' }, R.error)); return; }
     if (!R.data) { box.replaceChildren(head, h('p', { class: 'empty' }, 'Reading the runs from MLflow...')); return; }
     const errs = Object.entries(R.data.errors || {});
@@ -981,13 +986,28 @@
     if (R.tab === 'mlflow') $('#mlflowtab').replaceChildren(h('p', { class: 'empty' }, 'Changing the database...'));
     else paint();
     let ok = true;
-    try { R.source = await api('/api/source', { which }); status(`Results and MLflow tabs: ${R.source.label}`); } catch (e) { ok = false; status(e.message, true); }
+    R.switchError = '';
+    try { R.source = await api('/api/source', { which }); status(`Results and MLflow tabs: ${R.source.label}`); } catch (e) {
+      ok = false;
+      R.switchError = `Could not switch to the ${which === 'sync' ? `synchronised database on ${R.source.central}` : 'local database'}: ${e.message}`;
+      status(R.switchError, true);
+    }
     R.switching = false;
     if (ok) {                                     // everything shown came from the other database
       loadGen += 1; mlflowGen += 1; R.loading = false; mlflowReady = false; $('#mlflowtab').replaceChildren(); R.out = {}; R.data = null;
     }
-    if (R.tab === 'mlflow') startMlflow();
+    if (R.tab === 'mlflow') { if (ok) startMlflow(); else switchFailed(); }
     else if (R.tab === 'results') { if (ok) load(true); else paint(); }
+  }
+
+  /* the switch failed: say why (and nothing from the database still chosen, which may not answer either) */
+  function switchFailed() {
+    $('#mlflowtab').replaceChildren(h('div', { class: 'mlflow-bar' }, h('span', { class: 'sp' }), sourceSwitch()), switchNote(),
+      h('button', { type: 'button', class: 'ghost', onclick: () => { R.switchError = ''; startMlflow(); } }, `Open MLflow on the ${R.source?.label || 'database'} instead`));
+  }
+  function switchNote() {
+    return h('p', { class: 'dlg-err' }, R.switchError, ' ',
+      /not connected/.test(R.switchError) ? h('button', { type: 'button', class: 'tiny', onclick: () => switchTab('servers') }, 'Servers') : '');
   }
 
   async function fetchSource() {
