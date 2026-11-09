@@ -52,6 +52,8 @@ def image(cfg):
     img = img or next((v["value"] for v in cfg["variables"]["docker"] if v["name"] == "IMAGE_NAME"), "")
     if not img:
         raise ValueError("no image for the MLflow server: set it in Settings (MLflow server image), or 'local'")
+    if img == os.environ.get("LAUNCHER_IMAGE"):
+        return None                     # the launcher already runs in that image (start.sh): its mlflow is the one
     return img
 
 

@@ -627,7 +627,8 @@ function editSettings() {
       { key: 'config_var', label: 'Variable holding the base config file', value: p.config_var, mono: true },
       { key: 'commit_var', label: 'Variable holding the commit the script checks out', value: p.commit_var, mono: true },
       { key: 'tracking_uri', label: 'MLflow tracking URI (Results and MLflow tabs)', value: p.tracking_uri, mono: true },
-      { key: 'mlflow_image', label: 'MLflow server image: its MLflow must match the databases (empty: the Docker image variable; local: the launcher\'s own mlflow, no container)', value: p.mlflow_image, mono: true, placeholder: 'e.g. me/myproject:1.0' },
+      { key: 'mlflow_image', label: 'Image of the launcher (start.sh) and of its MLflow server: its MLflow must match the databases (empty: the Docker image variable; local: no container)', value: p.mlflow_image, mono: true, placeholder: 'e.g. me/myproject:1.0' },
+      { key: 'snapshot', label: 'What start.sh copies of the project for the launcher\'s container, relative to the root (empty: everything but what .gitignore files exclude; used at the next start)', value: p.snapshot, mono: true, placeholder: 'e.g. .git src configs submodules scripts' },
     ],
     onSubmit: async (v) => { await commit((c) => { Object.assign(c.project, v); }); },
   });

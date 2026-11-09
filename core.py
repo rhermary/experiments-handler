@@ -65,7 +65,8 @@ PLACEHOLDER = re.compile(r"@@(\w+)@@")
 PROJECT_DEFAULTS = {"root": ".", "scripts_dir": "scripts", "src_dir": "src",
                     "env_prefix": "APP_", "env_sep": "__", "config_var": "CONFIG", "commit_var": "COMMIT",
                     "tracking_uri": "sqlite:///mlflow.db",     # MLflow tracking URI (sqlite:///..., postgresql://..., http://...)
-                    "mlflow_image": ""}     # image of the launcher's MLflow server (empty: IMAGE_NAME; local: no container)
+                    "mlflow_image": "",     # image of the launcher's MLflow server (empty: IMAGE_NAME; local: no container)
+                    "snapshot": ""}         # what start.sh copies of the project for the container (empty: all but .gitignore'd)
 
 HEADER_COMMENT = """\
 # Athanor configuration (version 3). The page edits this file; the previous version is kept
@@ -502,8 +503,9 @@ def write_template(text):
 
 
 def project_root(cfg):
-    """The project the scripts run in: project.root, relative to the settings file when it is not absolute."""
-    root = Path(cfg["project"]["root"]).expanduser()
+    """The project the scripts run in: $XP_ROOT (set by start.sh: the copy of the project the launcher's container
+    sees), else project.root, relative to the settings file when it is not absolute."""
+    root = Path(os.environ.get("XP_ROOT") or cfg["project"]["root"]).expanduser()
     return (root if root.is_absolute() else CONFIG_PATH.parent / root).resolve()
 
 

@@ -79,6 +79,27 @@ report script that makes the PDF figures).
 
 ## Run
 
+Checked out as `<project>/tools/experiments-handler`, set up once, then start it:
+
+```bash
+tools/experiments-handler/init.sh --data /data/me/launcher/myproject --image me/myproject:1.0
+tools/experiments-handler/start.sh          # in the background: http://<server>:5925 (logs | status | stop)
+```
+
+- `init.sh` creates the data folder (settings from `defaults.yaml`, `template.sh` from `template.example.sh`,
+  `.gitignore`) and links `<project>/tools/experiments` to it; `--move` moves an existing `tools/experiments` there.
+  Run it again at any time: it only creates what is missing. `--help` for the options.
+- `start.sh` runs the app in a Docker container of the project's image (`--image`, or `project.mlflow_image` in the
+  settings), so its MLflow is the one that wrote the databases. The project may be on a mount the host's Docker
+  does not see (sshfs in a dev container): it copies the project into `<data>/.launcher/snapshot/` at each start
+  (`project.snapshot`: what to copy; empty: everything but what `.gitignore` files exclude), lends your ssh agent to
+  the container, and publishes its port like the database containers (`LAUNCHER_PORT`, `LAUNCHER_BIND`). The data
+  folder must be on a disk the host shares at the same path, where unix sockets can be created. The header of
+  `start.sh` describes it all; `--attach` keeps it in the terminal, `--no-container` runs it with this machine's
+  python.
+
+Without the scripts:
+
 ```bash
 pip install -r requirements.txt
 python app.py --config path/to/your/project/tools/experiments/experiments.yaml   # http://127.0.0.1:8000
@@ -96,8 +117,10 @@ python app.py --config path/to/your/project/tools/experiments/experiments.yaml  
 - Generated scripts go to `<project>/<scripts_dir>/<XP>/`, base configs written by the app to
   `<project>/<scripts_dir>/<XP>/configs/` (copied into the container by `@@COPY_FILES@@`).
 
-**Security**: the app writes and runs shell scripts, and runs the report scripts it generates. It listens on
-127.0.0.1 by default; use `--host 0.0.0.0` only on a network you trust.
+**Security**: the app writes and runs shell scripts, and runs the report scripts it generates; nothing asks who you
+are. `app.py` listens on 127.0.0.1 by default; use `--host 0.0.0.0` only on a network you trust. `start.sh`
+publishes it on every interface of the server (`LAUNCHER_BIND=127.0.0.1` to restrict it), and its container has your
+ssh agent and the host's Docker socket.
 
 Optional: `latex` and `dvisvgm` to show the LaTeX tables compiled; a LaTeX install with `LM Roman` for the PDF figures.
 
@@ -126,3 +149,4 @@ Optional: `latex` and `dvisvgm` to show the LaTeX tables compiled; a LaTeX insta
 | `xpqueue.py` | queue of experiments (frozen scripts, started when their GPUs are free) |
 | `*.js`, `app.css`, `index.html` | the page (no build step) |
 | `defaults.yaml`, `template.example.sh` | example settings and script template |
+| `init.sh`, `start.sh`, `agent_relay.py` | set up the data folder of a project; start the app in a container (with the relay that lends it your ssh agent) |
