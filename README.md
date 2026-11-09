@@ -31,7 +31,13 @@ A small web app to build, launch and analyse the experiments of a Python researc
   through this machine), then the rows (one transaction), then both are checked. *Checkpoints*: the checkpoint folders
   of the runs already synchronised, then checked. Experiments are matched by name (their ids differ between
   databases); runs on older artifact paths are left alone; nothing is deleted.
-- **MLflow** UI in a tab, and the **GPU** usage of your servers (ssh).
+- **MLflow** UI in a tab, and the **GPU** usage of your servers (ssh). The MLflow server runs in a Docker container
+  (Settings: *MLflow server image*; empty: the Docker image variable; `local`: the launcher's own mlflow), so its
+  MLflow matches the databases; the Results tab reads the runs through it. An image whose MLflow writes another schema
+  than the database's is refused (MLflow would try to migrate the database).
+- **Local | Synchronised** (Results and MLflow tabs): read the runs from the tracking URI of the Settings, or from
+  the synchronised database of the central server (a tunnel to its Postgres, opened when you choose it; the central
+  server must be connected and its synchronised database started).
 
 ## Screenshots
 
@@ -112,9 +118,10 @@ Optional: `latex` and `dvisvgm` to show the LaTeX tables compiled; a LaTeX insta
 | `preview.py`, `checker.py`, `picker.py`, `indexer.py` | config preview, variable checks, argument browser (static scan of the source folder) |
 | `xpconfigs.py` | base configs written by the app, XPs imported from MLflow runs |
 | `results.py`, `report_template.py` | Results tab; `report_template.py` is also the code of the generated report scripts |
-| `diffview.py`, `gpus.py`, `mlflow_ui.py` | Diff of two selections, GPU view, MLflow UI proxy |
+| `diffview.py`, `gpus.py`, `mlflow_ui.py` | Diff of two selections, GPU view, MLflow server (in a container) and its proxy |
 | `remote.py`, `actions.py` | servers and their databases over ssh; every action as a list of commands, shown first and logged |
 | `sync.py` | sync of a server's runs, artifacts and checkpoints into the central server's synchronised database |
+| `sources.py` | the database read by the Results and MLflow tabs: local, or the synchronised one (its tunnel) |
 | `db/launch.sh`, `db/serve.sh` | a Postgres database and its MLflow UI in a container: copied to `<launcher>/db` on the server and run by Databases > Start (image chosen at each start) |
 | `xpqueue.py` | queue of experiments (frozen scripts, started when their GPUs are free) |
 | `*.js`, `app.css`, `index.html` | the page (no build step) |

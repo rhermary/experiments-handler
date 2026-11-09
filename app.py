@@ -29,6 +29,7 @@ import mlflow_ui
 import picker
 import preview
 import results
+import sources
 import xpconfigs
 
 LAUNCH_WAIT_S = 30  # how long a launch waits for the script before reporting "still running"
@@ -370,12 +371,21 @@ def api_latex():
 
 @app.post("/api/mlflow/start")
 def api_mlflow_start():
-    """Start (or reuse) the MLflow server for the project's tracking URI; the UI is then at /mlflow/."""
+    """Start (or reuse) the MLflow server for the database chosen (sources.py); the UI is then at /mlflow/."""
     cfg = core.load()
-    uri = cfg["project"].get("tracking_uri") or ""
-    if not uri:
-        raise ValueError("set the MLflow tracking URI in Settings")
-    return jsonify(mlflow_ui.start(uri))
+    return jsonify(mlflow_ui.start(sources.db_uri(cfg), mlflow_ui.image(cfg)))
+
+
+@app.get("/api/source")
+def api_source():
+    """The database the Results and MLflow tabs read: {which: local | sync, central, label}."""
+    return jsonify(sources.view(core.load()))
+
+
+@app.post("/api/source")
+def api_source_set():
+    """Read from body {which: local | sync}: opens (or closes) the tunnel to the synchronised database."""
+    return jsonify(sources.select(core.load(), str(request.get_json(force=True).get("which") or "local")))
 
 
 @app.get("/api/mlflow/status")

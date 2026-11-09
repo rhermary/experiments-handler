@@ -64,7 +64,8 @@ LOOP_VAR = re.compile(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b")
 PLACEHOLDER = re.compile(r"@@(\w+)@@")
 PROJECT_DEFAULTS = {"root": ".", "scripts_dir": "scripts", "src_dir": "src",
                     "env_prefix": "APP_", "env_sep": "__", "config_var": "CONFIG", "commit_var": "COMMIT",
-                    "tracking_uri": "sqlite:///mlflow.db"}     # MLflow tracking URI (sqlite:///..., postgresql://..., http://...)
+                    "tracking_uri": "sqlite:///mlflow.db",     # MLflow tracking URI (sqlite:///..., postgresql://..., http://...)
+                    "mlflow_image": ""}     # image of the launcher's MLflow server (empty: IMAGE_NAME; local: no container)
 
 HEADER_COMMENT = """\
 # Athanor configuration (version 3). The page edits this file; the previous version is kept

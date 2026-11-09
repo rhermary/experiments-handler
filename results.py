@@ -20,7 +20,9 @@ import time
 
 
 import core
+import mlflow_ui
 import preview
+import sources
 
 DEFAULT_METRICS = (("aupr/max", "AUPR"), ("auroc/max", "AUROC"), ("f1score/max/youden", "F1"))
 CACHE_S = 60
@@ -416,7 +418,7 @@ def report_config(cfg, sel, dimensions=None, fresh=False):
     xp = core.xp_of(cfg, sel["xp"])
     top = xp.get("results") or {}
     res = selection_of(xp, sel.get("selection"))           # filter, layout, metrics, views, readme
-    base = {"tracking_uri": cfg["project"]["tracking_uri"], "experiment": experiment_of(cfg, sel),
+    base = {"tracking_uri": sources.tracking_uri(cfg), "experiment": experiment_of(cfg, sel),
             "filter": res.get("filter", DEFAULT_FILTER), "links": []}
     raw = _runs_df(base, fresh)
     found, id_cols = detect_links(raw) if len(raw) else ([], set())
@@ -448,7 +450,7 @@ def report_config(cfg, sel, dimensions=None, fresh=False):
 def _runs_df(conf, fresh=False):
     import mlflow                                           # pylint: disable=import-outside-toplevel
     os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
-    key = (conf["tracking_uri"], conf["experiment"], conf["filter"])
+    key = (conf["tracking_uri"], mlflow_ui.generation(), conf["experiment"], conf["filter"])
     links = conf.get("links") or []
     with _LOCK:
         hit = _RUNS.get(key)

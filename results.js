@@ -7,7 +7,7 @@
    it is precomputed, it can be run again later. The server writes and runs it; the page never sends code.
    Depends on editors.js ($, h, api, status, openDialog, openChooser, autoGrow) and app.js (cfg, st, blk, commit, draw). */
 (() => {
-  const R = { data: null, error: '', loading: false, tab: 'launcher', out: {}, view: 'table', sel: null };
+  const R = { data: null, error: '', loading: false, tab: 'launcher', out: {}, view: 'table', sel: null, source: null, switching: false };
   const selq = () => ({ ...st, selection: R.sel });     // the launcher's selection + the results selection shown
   const OTHER = '(other)';
   try { R.view = localStorage.getItem('xp-results-view') || 'table'; } catch (e) { /* storage unavailable */ }
@@ -914,7 +914,8 @@
     if (!box || R.tab !== 'results') return;
     const head = h('div', { class: 'rs-head' }, h('h2', {}, 'Results'),
       R.data ? h('span', { class: 'hint' }, `${R.data.config.experiment}: ${R.data.runs.length} runs from the filter`) : '',
-      h('span', { class: 'sp' }), h('button', { type: 'button', class: 'ghost', onclick: () => { R.out = {}; load(true); } }, R.loading ? 'Loading...' : 'Refresh'));
+      h('span', { class: 'sp' }), sourceSwitch(),
+      h('button', { type: 'button', class: 'ghost', onclick: () => { R.out = {}; load(true); } }, R.loading ? 'Loading...' : 'Refresh'));
     if (R.error) { box.replaceChildren(head, h('pre', { class: 'dlg-err' }, R.error)); return; }
     if (!R.data) { box.replaceChildren(head, h('p', { class: 'empty' }, 'Reading the runs from MLflow...')); return; }
     const errs = Object.entries(R.data.errors || {});
@@ -942,36 +943,83 @@
     box.replaceChildren(head, selectionStrip(), controls(), readmeBox(), note, body);
   }
 
+  let loadGen = 0;                                // a newer load (or another database) drops the older answer
   async function load(fresh) {
     if (!st.xp) return;
+    const gen = ++loadGen;
     R.loading = true; R.error = ''; paint();
-    try { R.data = await api('/api/report/preview', { sel: selq(), fresh }); } catch (e) { R.error = e.message; R.data = null; }
+    let data = null, error = '';
+    try { data = await api('/api/report/preview', { sel: selq(), fresh }); } catch (e) { error = e.message; }
+    if (gen !== loadGen) return;
+    R.data = data; R.error = error;
     R.loading = false;
     paint();
     drawStrip();                                  // the launcher flags the options without runs
     window.dispatchEvent(new Event('xp-state'));  // router.js: the selection or view may have changed
   }
 
+  /* ---------- the database read by the Results and MLflow tabs: local, or the synchronised one of the central
+     server (through a tunnel the launcher opens when you choose it: sources.py) ---------- */
+
+  function sourceSwitch() {
+    const s = R.source;
+    const b = (which, label, title) => h('button', {
+      type: 'button', 'aria-pressed': String(s?.which === which), title,
+      // h() sets every attribute it is given (disabled="false" disables): null leaves it out
+      disabled: R.switching || (which === 'sync' && s && !s.central) ? '' : null, onclick: () => pickSource(which),
+    }, label);
+    return h('span', { class: 'seg src-switch', role: 'group', 'aria-label': 'Database', title: s ? `Reading: ${s.label}` : '' },
+      b('local', 'Local', 'the MLflow tracking URI of the Settings'),
+      b('sync', 'Synchronised', s?.central ? `the synchronised database on ${s.central} (connect it in Servers first)` : 'no central server in the settings'));
+  }
+
+  async function pickSource(which) {
+    if (!R.source) await fetchSource();
+    if (!R.source || R.source.which === which || R.switching) return;
+    R.switching = true;
+    status(which === 'sync' ? `Opening a tunnel to the synchronised database on ${R.source.central}...` : 'Back to the local database...');
+    if (R.tab === 'mlflow') $('#mlflowtab').replaceChildren(h('p', { class: 'empty' }, 'Changing the database...'));
+    else paint();
+    let ok = true;
+    try { R.source = await api('/api/source', { which }); status(`Results and MLflow tabs: ${R.source.label}`); } catch (e) { ok = false; status(e.message, true); }
+    R.switching = false;
+    if (ok) {                                     // everything shown came from the other database
+      loadGen += 1; mlflowGen += 1; R.loading = false; mlflowReady = false; $('#mlflowtab').replaceChildren(); R.out = {}; R.data = null;
+    }
+    if (R.tab === 'mlflow') startMlflow();
+    else if (R.tab === 'results') { if (ok) load(true); else paint(); }
+  }
+
+  async function fetchSource() {
+    try { R.source = await api('/api/source'); } catch (e) { status(`Which database is read: ${e.message}`, true); return; }
+    for (const el of document.querySelectorAll('.src-switch')) el.replaceWith(sourceSwitch());
+  }
+  fetchSource();
+
   /* ---------- MLflow tab: the UI of an MLflow server started by the launcher ---------- */
 
-  let mlflowReady = false, pendingHash = null;
+  let mlflowReady = false, pendingHash = null, mlflowGen = 0, mlflowImage = '';
 
   async function startMlflow() {
     const box = $('#mlflowtab');
     if (mlflowReady) { showFrame('/mlflow/'); return; }
-    const msg = h('p', { class: 'empty' }, 'Starting the MLflow server (a few seconds)...');
-    box.replaceChildren(msg);
+    const gen = ++mlflowGen;                      // another database chosen meanwhile: this start is dropped
+    box.replaceChildren(h('div', { class: 'mlflow-bar' }, h('span', { class: 'sp' }), sourceSwitch()),
+      h('p', { class: 'empty' }, `Starting the MLflow server${cfg.project.mlflow_image === 'local' ? '' : ' in a container'} on the ${R.source?.label || 'database'} (a few seconds)...`));
     try {
       let s = await api('/api/mlflow/start', {});
-      for (let i = 0; i < 90 && s.state === 'starting'; i += 1) {
+      for (let i = 0; i < 90 && s.state === 'starting' && gen === mlflowGen; i += 1) {
         await new Promise((ok) => setTimeout(ok, 1000));
         s = await api('/api/mlflow/status');
       }
+      if (gen !== mlflowGen) return;
       if (s.state !== 'running') throw new Error(`MLflow server ${s.state}` + (s.log ? `:\n${s.log}` : ''));
-      mlflowReady = true;
+      mlflowReady = true; mlflowImage = s.image || '';
       showFrame('/mlflow/');
     } catch (e) {
-      box.replaceChildren(h('pre', { class: 'dlg-err' }, e.message), h('button', { type: 'button', class: 'ghost', onclick: startMlflow }, 'Try again'));
+      if (gen !== mlflowGen) return;
+      box.replaceChildren(h('div', { class: 'mlflow-bar' }, h('span', { class: 'sp' }), sourceSwitch()),
+        h('pre', { class: 'dlg-err' }, e.message), h('button', { type: 'button', class: 'ghost', onclick: startMlflow }, 'Try again'));
     }
   }
 
@@ -988,8 +1036,8 @@
         window.dispatchEvent(new Event('xp-state'));
       });
       box.replaceChildren(h('div', { class: 'mlflow-bar' },
-        h('span', { class: 'hint' }, `MLflow server started by the launcher (${cfg.project.tracking_uri.split('?')[0]})`),
-        h('span', { class: 'sp' }),
+        h('span', { class: 'hint' }, `MLflow server started by the launcher (${R.source?.label || cfg.project.tracking_uri.split('?')[0]}${mlflowImage ? `, in ${mlflowImage}` : ''})`),
+        h('span', { class: 'sp' }), sourceSwitch(),
         h('button', { type: 'button', class: 'tiny', onclick: () => { frame.src = base + '#/experiments'; } }, 'Experiments'),
         h('a', { class: 'tiny', href: base, target: '_blank', rel: 'noopener' }, 'Open in a new tab')), frame);
     } else if (url !== base) frame.src = url;
