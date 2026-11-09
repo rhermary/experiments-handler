@@ -5,7 +5,7 @@
    Depends on editors.js ($, h, api, status, openDialog) and app.js (cfg, st, table, blk, xpDef). */
 (() => {
   let dlg = null, timer = null, last = null;
-  const STATUS = { waiting: 'waiting', starting: 'starting', started: 'started', failed: 'failed' };
+  const STATUS = { waiting: 'Waiting', starting: 'Starting', started: 'Started', failed: 'Failed' };
 
   function devicesVar() {
     return Object.keys(table).find((n) => n.startsWith(cfg.project.env_prefix) && /DEVICES$/i.test(n));
@@ -47,18 +47,18 @@
       title: `Queue "${st.xp}"${server ? ` on ${server}` : ''}`,
       fields: [
         { key: 'when', type: 'select', label: 'Start', value: 'auto', options: [
-          { value: 'auto', label: 'automatically, in its turn, when its GPUs are free' },
-          { value: 'manual', label: 'manually: it waits in the queue until I start it (Start now)' }] },
+          { value: 'auto', label: 'Automatically, in its turn, when its GPUs are free' },
+          { value: 'manual', label: 'Manually: it waits in the queue until I start it (Start now)' }] },
         { type: 'note', label: `${server ? `Runs on ${server} (Run on, next to Launch), in its own line, when its GPUs are free. ` : ''}${opts || 'no option to choose'}${st.loop ? ` · loop: ${st.loop}` : ''}. The script is written now from this selection (later edits of the XP do not change it); `
           + (dv ? `only ${dv} is set when it starts.` : 'there is no devices variable (…DEVICES): it starts as soon as it is first in the queue.') },
         ...(dv ? [
           { key: 'mode', type: 'select', label: `GPUs (${dv} is ${value || 'empty'} now)`, value: 'auto', options: [
-            { value: 'auto', label: 'any free GPUs, as many as below' },
-            ...(p.idx ? [{ value: 'fixed', label: `exactly ${value}, when they are free` }] : [])] },
+            { value: 'auto', label: 'Any free GPUs, as many as below' },
+            ...(p.idx ? [{ value: 'fixed', label: `Exactly ${value}, when they are free` }] : [])] },
           { key: 'count', label: 'How many GPUs (any free ones)', value: String(p.n) },
         ] : []),
       ],
-      submitLabel: 'Add to queue',
+      submitLabel: 'Add to Queue',
       onSubmit: async (v) => {
         const count = v.count === undefined ? undefined : Number(v.count);
         if (count !== undefined && !(count >= 1)) throw new Error('How many GPUs: a number, 1 or more');
@@ -95,7 +95,7 @@
   }
 
   function gpuPicker(it, sel) {
-    if (it.mode === 'none') return h('span', { class: 'hint' }, 'no devices variable');
+    if (it.mode === 'none') return h('span', { class: 'hint' }, 'No devices variable');
     const list = gpusOf(it.server);
     if (!list) {
       const input = h('input', { type: 'text', class: 'mono q-devin', value: chosen[it.id] ? `[${chosen[it.id].join(', ')}]` : it.queued_value || '',
@@ -128,19 +128,19 @@
 
   function itemRow(it, i, items, sugg) {
     const waiting = it.status === 'waiting';
-    const want = it.mode === 'fixed' ? `GPUs [${(it.fixed || []).join(', ')}]` : it.mode === 'none' ? 'no devices variable' : `${it.count} free GPU${it.count > 1 ? 's' : ''}`;
+    const want = it.mode === 'fixed' ? `GPUs [${(it.fixed || []).join(', ')}]` : it.mode === 'none' ? 'No devices variable' : `${it.count} free GPU${it.count > 1 ? 's' : ''}`;
     const given = it.devices != null && it.status !== 'waiting' ? ` → ${it.devices_var}=${it.devices}` : '';
     const btn = (label, action, title, cls = 'tiny') => h('button', { type: 'button', class: cls, title, onclick: () => act(action, it.id) }, label);
     return h('li', { class: 'q-item ' + it.status },
       h('div', { class: 'q-main' },
-        h('span', { class: 'q-pos', title: it.manual ? 'started by hand only' : 'its turn in the queue' },
+        h('span', { class: 'q-pos', title: it.manual ? 'Started by hand only' : 'Its turn in the queue' },
           waiting ? (it.manual ? '✋' : String(items.filter((x, k) => k <= i && x.status === 'waiting' && !x.manual && (x.server || '') === (it.server || '')).length)) : ''),
         h('div', { class: 'q-what' },
-          h('b', {}, it.xp), ' ', h('span', { class: 'q-opt', title: 'where it runs (Run on, when it was queued)' }, it.server ? `on ${it.server}` : 'this machine'),
+          h('b', {}, it.xp), ' ', h('span', { class: 'q-opt', title: 'Where it runs (Run on, when it was queued)' }, it.server ? `On ${it.server}` : 'This machine'),
           h('div', { class: 'q-opts' }, ...(it.options || []).map((o) => h('span', { class: 'q-opt' }, h('small', {}, o.block), ' ', o.option)),
-            it.loop ? h('span', { class: 'q-opt loop', title: 'command loop' }, it.loop) : '')),
+            it.loop ? h('span', { class: 'q-opt loop', title: 'Command loop' }, it.loop) : '')),
         h('div', { class: 'q-dev' }, h('span', {}, want), h('span', { class: 'hint' }, given), waiting ? gpuPicker(it, sugg[it.id] || []) : ''),
-        h('span', { class: 'q-status ' + it.status + (waiting && it.manual ? ' manual' : '') }, waiting && it.manual ? 'manual' : STATUS[it.status] || it.status),
+        h('span', { class: 'q-status ' + it.status + (waiting && it.manual ? ' manual' : '') }, waiting && it.manual ? 'Manual' : STATUS[it.status] || it.status),
         h('div', { class: 'q-acts' },
           waiting && items.slice(0, i).some((x) => x.status === 'waiting') ? btn('↑', 'up', 'Earlier in the queue') : '',
           waiting && items.slice(i + 1).some((x) => x.status === 'waiting') ? btn('↓', 'down', 'Later in the queue') : '',
@@ -155,7 +155,7 @@
             it.manual ? 'Let the queue start it in its turn, when its GPUs are free' : 'Keep it in the queue but start it only by hand') : '',
           it.status === 'failed' ? btn('Retry', 'retry', 'Put it back in the queue') : '',
           it.status !== 'starting' ? btn('Remove', 'remove', '', 'tiny danger') : '')),
-      h('div', { class: 'q-meta hint' }, `queued ${it.created.replace('T', ' ')}`, it.started ? ` · started ${it.started.replace('T', ' ')}` : '',
+      h('div', { class: 'q-meta hint' }, `Queued ${it.created.replace('T', ' ')}`, it.started ? ` · started ${it.started.replace('T', ' ')}` : '',
         it.path ? ' · ' : '', it.path ? h('code', {}, it.path) : '', it.folder ? ` · on ${it.server}: ` : '', it.folder ? h('code', {}, it.folder) : ''),
       it.output ? h('details', { class: 'q-out' }, h('summary', {}, it.status === 'failed' ? 'Output (failed)' : 'Output of the launch'), h('pre', {}, it.output)) : '');
   }
@@ -173,7 +173,7 @@
         h('span', { class: 'hint' }, `${waiting} waiting · checked every ${last.poll_s} s`),
         h('span', { class: 'sp' }),
         h('button', { type: 'button', class: 'ghost', onclick: () => act(last.paused ? 'resume' : 'pause') }, last.paused ? 'Resume' : 'Pause'),
-        done ? h('button', { type: 'button', class: 'ghost', title: 'Remove the started and failed items', onclick: () => act('clear') }, `Clear ${done} done`) : '',
+        done ? h('button', { type: 'button', class: 'ghost', title: 'Remove the started and failed items', onclick: () => act('clear') }, `Clear ${done} Done`) : '',
         h('button', { type: 'button', class: 'ghost', onclick: () => dlg.close() }, 'Close')),
       h('p', { class: 'dlg-note' }, 'Items start one after the other, each when enough GPUs are free (no process, under 512 MiB used), on this machine or on the server they were queued for '
         + '(each server has its own line; its GPUs are read over ssh); only the devices variable is set then. A GPU just given to an item counts as taken for 5 minutes. Manual items (✋) wait until you start them, '

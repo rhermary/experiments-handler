@@ -169,7 +169,7 @@ function openChooser({ title, load, current, onPick }) {
     chooserDlg = h('dialog', { id: 'chooser', class: 'wide chooser', 'aria-label': 'Choose' });
     document.body.append(chooserDlg);
   }
-  const filter = h('input', { type: 'text', placeholder: 'filter', spellcheck: 'false', autocomplete: 'off' });
+  const filter = h('input', { type: 'text', placeholder: 'Filter', spellcheck: 'false', autocomplete: 'off' });
   const list = h('div', { class: 'ch-list', role: 'listbox' }, h('p', { class: 'empty' }, 'Loading...'));
   const note = h('p', { class: 'dlg-note' });
   let items = [];

@@ -22,23 +22,23 @@
     const used = g.mem_total ? g.mem_used / g.mem_total : 0;
     const free = !g.processes.length && (g.mem_used ?? 0) < 512;
     const rows = g.processes.map((p) => h('tr', {},
-      h('td', {}, p.visible ? p.user : h('span', { class: 'hint', title: p.why || 'not visible' }, '?')),
+      h('td', {}, p.visible ? p.user : h('span', { class: 'hint', title: p.why || 'Not visible' }, '?')),
       h('td', { class: 'mono' }, p.pid),
       h('td', { class: 'mono num' }, MiB(p.mem)),
       h('td', { class: 'num' }, ago(p.elapsed)),
       h('td', { class: 'mono cmd', title: p.cmd || '' }, p.xp ? h('b', {}, `XP=${p.xp}`) : '', p.xp ? ' ' : '', p.cmd || '')));
     return h('div', { class: 'gpu' + (mine ? ' mine' : '') + (free ? ' free' : '') },
       h('div', { class: 'gpu-head' }, h('b', {}, `#${g.index}`), h('span', {}, g.name),
-        mine ? h('span', { class: 'gpu-tag mine', title: 'APP_SETTINGS__DEVICES of the selected XP (when it runs on this server)' }, 'this XP (DEVICES)') : '',
-        free ? h('span', { class: 'gpu-tag free' }, 'free') : '',
+        mine ? h('span', { class: 'gpu-tag mine', title: 'APP_SETTINGS__DEVICES of the selected XP (when it runs on this server)' }, 'This XP (DEVICES)') : '',
+        free ? h('span', { class: 'gpu-tag free' }, 'Free') : '',
         h('span', { class: 'sp' }), h('span', { class: 'hint' }, g.temp != null ? `${g.temp} °C` : '')),
       h('div', { class: 'gpu-meters' },
-        h('span', { class: 'gpu-k' }, 'memory'), bar(used, used > .9 ? 'hot' : 'mem'),
+        h('span', { class: 'gpu-k' }, 'Memory'), bar(used, used > .9 ? 'hot' : 'mem'),
         h('span', { class: 'gpu-v mono' }, `${MiB(g.mem_used)} / ${MiB(g.mem_total)}  (${MiB(g.mem_free)} free)`),
-        h('span', { class: 'gpu-k' }, 'load'), bar((g.util ?? 0) / 100, 'util'),
+        h('span', { class: 'gpu-k' }, 'Load'), bar((g.util ?? 0) / 100, 'util'),
         h('span', { class: 'gpu-v mono' }, g.util == null ? '?' : `${g.util} %`)),
       rows.length ? h('table', { class: 'gpu-procs' },
-        h('thead', {}, h('tr', {}, ...['user', 'pid', 'memory', 'running', 'command'].map((t) => h('th', {}, t)))),
+        h('thead', {}, h('tr', {}, ...['User', 'PID', 'Memory', 'Running', 'Command'].map((t) => h('th', {}, t)))),
         h('tbody', {}, ...rows)) : h('p', { class: 'hint' }, 'No process.'));
   }
 
@@ -48,9 +48,9 @@
 
   /* all servers: one tile per server (like the tmux panes of states.sh), a compact line per GPU */
   function tile(sv, mine) {
-    const head = h('div', { class: 'gt-head' }, h('b', {}, sv.server), sv.server === info?.current ? h('span', { class: 'gpu-tag mine' }, 'this machine') : '', h('span', { class: 'sp' }));
+    const head = h('div', { class: 'gt-head' }, h('b', {}, sv.server), sv.server === info?.current ? h('span', { class: 'gpu-tag mine' }, 'This machine') : '', h('span', { class: 'sp' }));
     if (!sv.ok) {
-      head.append(h('span', { class: 'gt-state bad' }, 'unreachable'));
+      head.append(h('span', { class: 'gt-state bad' }, 'Unreachable'));
       return h('div', { class: 'gt bad', title: sv.error }, head, h('p', { class: 'gt-err' }, sv.error));
     }
     const free = sv.gpus.filter((g) => !g.processes.length && (g.mem_used ?? 0) < 512).length;
@@ -113,7 +113,7 @@
         hidden ? h('p', { class: 'dlg-note' }, 'Processes marked ? could not be named (hover for the reason).') : '',
         r.note ? h('p', { class: 'pk-warn' }, r.note) : '');
       const how = r.mode === 'local'
-        ? `local nvidia-smi${r.via ? `, owners through ${r.via}` : ''}: ${r.ssh_calls} ssh call${r.ssh_calls === 1 ? '' : 's'}`
+        ? `Local nvidia-smi${r.via ? `, owners through ${r.via}` : ''}: ${r.ssh_calls} ssh call${r.ssh_calls === 1 ? '' : 's'}`
         : `ssh ${r.via}: 1 call`;
       $('#gpu-time').textContent = `${r.hostname} - ${how} - ${Math.round(performance.now() - t0)} ms - ${new Date().toLocaleTimeString()}`;
     } catch (e) {
@@ -136,7 +136,7 @@
     const text = (info?.listed || info?.servers || []).map((s) => (s.comment != null ? s.comment
       : `${s.disabled ? '# ' : ''}${s.name} ${s.host}${s.port && s.port !== 22 ? ':' + s.port : ''}${s.user ? ' ' + s.user : ''}`)).join('\n');
     openDialog({
-      title: 'GPU servers',
+      title: 'GPU Servers',
       wide: true,
       fields: [{ key: 'text', type: 'area', rows: 10, mono: true, label: 'One server per line: name host[:port] [user]', value: text,
         hint: 'A line starting with #, // or % is ignored (the server stays in the list, not asked). The launcher connects with ssh (keys from the ssh agent, no password prompt). The server it runs on is found by itself '
@@ -176,7 +176,7 @@
     const sel = $('#gpu-server');
     if (!sel) return;
     const opts = info.servers.map((s) => h('option', { value: s.name }, s.name + (s.name === info.current ? '  (this machine)' : '')));
-    if (!info.current && info.local_gpus) opts.unshift(h('option', { value: 'local' }, `this machine (${info.hostname})`));
+    if (!info.current && info.local_gpus) opts.unshift(h('option', { value: 'local' }, `This machine (${info.hostname})`));
     if (info.servers.length) opts.unshift(h('option', { value: ALL }, 'All servers (summary)'));
     sel.replaceChildren(...opts);
     let want = server;

@@ -7,9 +7,9 @@ let checks = {};                                  // from the last preview: name
 const closedGroups = new Set(['docker']);   // the docker group is long and rarely edited
 
 const GROUPS = [
-  ['docker', 'Docker / generic', 'script variables; tick "container" in a variable to pass it to the container (-e)'],
-  ['run', 'Run', 'the command loop and its variables'],
-  ['process', 'Process (APP_*)', 'environment of the program (jsonargparse), always passed to the container'],
+  ['docker', 'Docker / generic', 'Script variables; tick "container" in a variable to pass it to the container (-e)'],
+  ['run', 'Run', 'The command loop and its variables'],
+  ['process', 'Process (APP_*)', 'Environment of the program (jsonargparse), always passed to the container'],
 ];
 
 const xpDef = () => cfg.xps.find((x) => x.name === st.xp);
@@ -245,7 +245,7 @@ function editOption(bid, name) {
       fixed ? { type: 'note', label: 'A fixed block: these variables are set for every run of this XP (e.g. adjustments of the base config that are not in a config file of the repo). The blocks after it can still override them.' }
         : { key: 'name', label: 'Name', value: row?.name ?? '' },
       { key: 'vars', type: 'pairs', label: 'Variables set by this option', value: Object.entries(row?.vars ?? {}).map(([k, x]) => [k, row.pretty?.[k] ?? x]),
-        keyPlaceholder: b.path ? 'name after the block path' : `${prefix()}... or a script variable`,
+        keyPlaceholder: b.path ? 'Name after the block path' : `${prefix()}... or a script variable`,
         resolve: (k) => (fullName(b, k) !== k ? '-> ' + fullName(b, k) : ''),
         onChange,
         actions: [{ label: 'Format as YAML', title: 'Show dicts and lists written on one line as indented YAML (same value)',
@@ -371,13 +371,13 @@ function addBlock() {
       hint: 'The copy belongs to this XP: editing it does not change the original.' });
   }
   fields.push({ key: 'kind', type: 'select', label: 'New block', value: 'options', options: [
-    { value: 'options', label: 'options: each sets its own variables' },
-    { value: 'list', label: 'a list of values (run ids...): pick one, or loop over all of them' }] },
+    { value: 'options', label: 'Options: each sets its own variables' },
+    { value: 'list', label: 'A list of values (run ids...): pick one, or loop over all of them' }] },
   { key: 'label', label: 'Name (new block, or to rename the copy)', value: '', placeholder: 'XP variant' },
     { key: 'path', label: 'New block: path (optional)', value: '', mono: true, placeholder: `${prefix()}TASK__INIT_ARGS__`,
       hint: 'Environment variable prefix; variables of its options are relative to it.' });
   openDialog({
-    title: `Add block to "${st.xp}"`,
+    title: `Add Block to "${st.xp}"`,
     fields,
     submitLabel: 'Add',
     onSubmit: async (v) => {
@@ -386,7 +386,8 @@ function addBlock() {
       await commit((c) => {
         const xp = c.xps.find((x) => x.name === st.xp);
         if (!v.source) {
-          xp.blocks.push({ id: uniqueId(xp.blocks, v.label), label: v.label.trim(), path: v.path.trim(), rows: [{ name: 'none', vars: {} }] });
+          const id = uniqueId(xp.blocks, v.label);
+          xp.blocks.push({ id, label: v.label.trim(), path: v.path.trim(), rows: [{ name: 'none', vars: {} }] });
           return;
         }
         const [xi, bid] = [Number(v.source.split(':')[0]), v.source.slice(v.source.indexOf(':') + 1)];
@@ -410,7 +411,7 @@ const removeBlock = (bid) => commit((c) => {
 function editLoop(name) {
   const row = name == null ? null : cfg.loop.options.find((r) => r.name === name);
   openDialog({
-    title: name == null ? 'Add a command loop' : `Command loop "${name}"`,
+    title: name == null ? 'Add a Command Loop' : `Command loop "${name}"`,
     wide: true,
     fields: [
       { key: 'name', label: 'Name', value: row?.name ?? '' },
@@ -472,22 +473,22 @@ function drawLoopPanel() {
       ev.currentTarget.parentNode.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === ev.currentTarget)));
     };
     const toggle = h('span', { class: 'seg lp-seg' },
-      h('button', { type: 'button', 'aria-pressed': 'true', onclick: pick('run') }, 'as it runs'),
-      h('button', { type: 'button', 'aria-pressed': 'false', onclick: pick('written') }, 'as written'));
+      h('button', { type: 'button', 'aria-pressed': 'true', onclick: pick('run') }, 'As It Runs'),
+      h('button', { type: 'button', 'aria-pressed': 'false', onclick: pick('written') }, 'As Written'));
     const what = lists.map((l) => 'the list "' + l.block + '" (' + l.values + ' values)').join(', ');
     const legend = h('span', { class: 'hint lp-legend' },
-      lists.length ? h('span', { class: 'lp-list-k' }, 'loop over ' + what + ', around the command loop') : '',
-      h('span', { class: 'lp-env-k' }, 'set at @@LOOP_ENV@@'));
-    const title = 'show the loop' + (lists.length ? ' (with ' + (lists.length === 1 ? 'a list' : lists.length + ' lists') + ' looped over)' : '');
+      lists.length ? h('span', { class: 'lp-list-k' }, 'Loop over ' + what + ', around the command loop') : '',
+      h('span', { class: 'lp-env-k' }, 'Set at @@LOOP_ENV@@'));
+    const title = 'Show the loop' + (lists.length ? ' (with ' + (lists.length === 1 ? 'a list' : lists.length + ' lists') + ' looped over)' : '');
     kids.push(h('details', { class: 'lp-text' }, h('summary', {}, title), h('div', { class: 'lp-bar' }, toggle, legend), shown, written));
   }
   kids.push(h('div', { class: 'lp-row' }, h('span', { class: 'lp-key', title: 'Defined by "for x in ..." in the loop; evaluated in the container' }, 'Loop variables'),
     ...(info ? (info.loop_vars.length ? info.loop_vars.map((n) => {
       const l = (info.lists || []).find((x) => x.loop_var === n);
       return h('code', { class: 'scope-chip loopvar' + (l ? ' fromlist' : ''),
-        title: l ? 'from the list "' + l.block + '": ' + l.values + ' values ($' + l.var + ' in the variables)' : 'defined by the command loop' },
+        title: l ? 'From the list "' + l.block + '": ' + l.values + ' values ($' + l.var + ' in the variables)' : 'Defined by the command loop' },
       '$' + n, l ? h('small', {}, ' list "' + l.block + '" x' + l.values) : '');
-    }) : [h('span', { class: 'hint' }, 'none')]) : [h('span', { class: 'hint' }, '...')])));
+    }) : [h('span', { class: 'hint' }, 'None')]) : [h('span', { class: 'hint' }, '...')])));
   for (const u of info?.undefined || []) kids.push(h('p', { class: 'pk-warn' }, `$${u.var} is used by ${u.used_by.join(', ')} but this loop does not define it`));
 
   // @@LOOP_ENV@@: automatic ones (value uses a loop variable) + the ones chosen in loop.env
@@ -496,21 +497,21 @@ function drawLoopPanel() {
   const chips = inLoop.map((e) => {
     const auto = !chosen.has(e.name);
     return h('span', { class: 'scope-chip loop', title: `${e.name}="${e.value}"  (${e.source})` }, short2(e.name),
-      auto ? h('small', {}, 'uses a loop variable')
+      auto ? h('small', {}, 'Uses a loop variable')
         : h('button', { type: 'button', class: 'x', 'aria-label': `Take ${e.name} out of the loop`,
           onclick: () => setLoopEnv((l) => l.splice(l.indexOf(e.name), 1)) }, 'x'));
   });
   for (const n of cfg.loop.env) if (!table[n]) {
-    chips.push(h('span', { class: 'scope-chip loop missing', title: 'No variable of this XP has this name' }, n, h('small', {}, 'not defined'),
+    chips.push(h('span', { class: 'scope-chip loop missing', title: 'No variable of this XP has this name' }, n, h('small', {}, 'Not defined'),
       h('button', { type: 'button', class: 'x', 'aria-label': `Remove ${n}`, onclick: () => setLoopEnv((l) => l.splice(l.indexOf(n), 1)) }, 'x')));
   }
   const candidates = Object.values(table).filter((e) => e.scope === 'script' && e.name !== 'XP');
   const add = h('select', { class: 'lp-add', title: 'Script variables; they become environment variables of each run' },
-    h('option', { value: '' }, '+ set a script variable inside the loop...'),
+    h('option', { value: '' }, '+ Set a script variable inside the loop...'),
     ...candidates.map((e) => h('option', { value: e.name }, `${e.name} = ${e.value.length > 40 ? e.value.slice(0, 37) + '...' : e.value}`)));
   add.addEventListener('change', () => { if (add.value) setLoopEnv((l) => l.push(add.value)); });
   kids.push(h('div', { class: 'lp-row' }, h('span', { class: 'lp-key', title: 'Replaced by NAME="value" lines, set for each run of the command' }, 'Inside the loop', h('code', {}, '@@LOOP_ENV@@')),
-    ...(chips.length ? chips : [h('span', { class: 'hint' }, 'nothing')]), add));
+    ...(chips.length ? chips : [h('span', { class: 'hint' }, 'Nothing')]), add));
   if (info && !info.has_loop_env && inLoop.length) kids.push(h('p', { class: 'pk-warn' }, `"${st.loop}" has no @@LOOP_ENV@@ line: add one before the command (Edit).`));
   box.replaceChildren(...kids);
 }
@@ -522,9 +523,9 @@ function short2(name) {
   return name.slice(p.length).split(cfg.project.env_sep).filter((s) => s && s !== 'INIT_ARGS').join('.').toLowerCase();
 }
 
-const SCOPE_TEXT = { script: 'script', container: '-e', loop: 'loop' };
-const SCOPE_TITLE = { script: 'script variable: not passed to the container', container: 'passed to the container with -e',
-  loop: 'set inside the loop, for each run (@@LOOP_ENV@@)' };
+const SCOPE_TEXT = { script: 'Script', container: '-e', loop: 'Loop' };
+const SCOPE_TITLE = { script: 'Script variable: not passed to the container', container: 'Passed to the container with -e',
+  loop: 'Set inside the loop, for each run (@@LOOP_ENV@@)' };
 
 /* Under each block: the variables its selected option sets, by scope, with the checker's verdict. */
 function blockVars(b) {
@@ -544,7 +545,7 @@ function blockVars(b) {
       title: `${full}=${raw}\n${SCOPE_TITLE[scope]}` + (over ? `\nOverridden by ${e.source}` : '') + (c?.notes?.length && !over ? '\n\n' + c.notes.join('\n') : '')
         + '\n\nDrag onto an option of any block to copy it there (hold Shift to move it).' },
       h('small', { class: 'bv-scope' }, SCOPE_TEXT[scope]), h('b', {}, shown), h('code', {}, flat),
-      over ? h('small', { class: 'flag' }, 'overridden') : bad ? h('small', { class: 'flag' }, bad === 'error' ? 'ignored / rejected' : 'check') : '');
+      over ? h('small', { class: 'flag' }, 'Overridden') : bad ? h('small', { class: 'flag' }, bad === 'error' ? 'Ignored / rejected' : 'Check') : '');
     el.addEventListener('dragstart', (ev) => {
       dragged = { bid: b.id, row: rowName, full, value: raw };
       ev.dataTransfer.setData('text/plain', `${full}=${raw}`);
@@ -576,10 +577,10 @@ const isGenerated = (path) => {
 
 function newConfig(current) {
   openDialog({
-    title: `New base config for "${st.xp}"`,
+    title: `New Base Config for "${st.xp}"`,
     fields: [
       { key: 'source', type: 'select', label: 'Start from', value: current ? 'copy' : 'empty',
-        options: [{ value: 'copy', label: `a copy of ${current || 'the current config'}` }, { value: 'empty', label: 'an empty config (task + settings)' }] },
+        options: [{ value: 'copy', label: `A copy of ${current || 'the current config'}` }, { value: 'empty', label: 'An empty config (task + settings)' }] },
       { type: 'note', label: `Written to ${genDir(st.xp)}/${slug(st.xp)}.yaml, outside git: the script copies it into the container and puts it back after the checkout of the commit, so it works whatever the commit. `
         + 'A "Base config" block of this XP selects it; relative subconfig paths are rewritten for the new place.' },
     ],
@@ -651,7 +652,7 @@ function pickCommit(name, input) {
 
 function pickConfig(name, input) {
   openChooser({
-    title: 'Base config',
+    title: 'Base Config',
     current: input.value.trim(),
     load: async () => {
       const r = await api('/api/files', st);
@@ -679,12 +680,12 @@ function editVar(group, name) {
   const was = v?.xp === 'edited' ? ` It is edited for ${xpName}: "every XP" puts back the shared variable here, with what you save.`
     : v?.xp === 'own' ? ` It exists in ${xpName} only: "every XP" makes it a shared variable.` : '';
   openDialog({
-    title: name == null ? `Add variable (${groupNames[group]})` : `Edit ${name}`,
+    title: name == null ? `Add Variable (${groupNames[group]})` : `Edit ${name}`,
     wide: true,
     fields: [
       ...(xpName ? [{ key: 'scope', type: 'select', label: 'Applies to', value: 'xp', options: [
-        { value: 'xp', label: `this XP only (${xpName}): the other XPs keep ${shared ? 'the shared variable' : 'what they have'}` },
-        { value: 'all', label: 'every XP (the shared variable)' }] },
+        { value: 'xp', label: `This XP only (${xpName}): the other XPs keep ${shared ? 'the shared variable' : 'what they have'}` },
+        { value: 'all', label: 'Every XP (the shared variable)' }] },
       { type: 'note', label: `What you save here (and Delete) changes ${xpName} only, unless "every XP" is chosen.${was}` }] : []),
       { key: 'group', type: 'select', label: 'Group', value: group, options: GROUPS.map(([g, t]) => ({ value: g, label: t })) },
       { key: 'name', label: 'Name', value: v?.name ?? '', mono: true, placeholder: group === 'process' ? `${prefix()}TASK__INIT_ARGS__BATCH_SIZE` : 'NB_RUNS' },
@@ -745,7 +746,7 @@ function editSettings() {
     title: 'Settings',
     wide: true,
     fields: [
-      { key: 'root', label: 'Project root (the scripts run from here)', value: p.root, mono: true, placeholder: 'absolute, or relative to the settings file (e.g. ../..)' },
+      { key: 'root', label: 'Project root (the scripts run from here)', value: p.root, mono: true, placeholder: 'Absolute, or relative to the settings file (e.g. ../..)' },
       { key: 'scripts_dir', label: 'Scripts folder (relative to the root)', value: p.scripts_dir, mono: true },
       { key: 'src_dir', label: 'Source folder (relative to the root)', value: p.src_dir, mono: true },
       { key: 'env_prefix', label: 'Environment variable prefix', value: p.env_prefix, mono: true },
@@ -764,7 +765,7 @@ async function editTemplate() {
   let text;
   try { text = (await api('/api/template')).text; } catch (e) { status(e.message, true); return; }
   openDialog({
-    title: 'Script template',
+    title: 'Script Template',
     wide: true,
     fields: [
       { type: 'note', label: 'Placeholders: @@HEADER@@ (comment lines), @@WORKDIR@@ (project root), @@SHELL_VARS@@ (script variables), '
@@ -795,7 +796,7 @@ function pickerCard({ bid, label, tag, list, fixed, rows, selected, onPick, onAd
       ...rows.map((r) => h('div', { class: 'item' + (r.loop ? ' loop-all' : ''), 'data-row': r.name, title: r.loop ? 'Runs the command loop once per value of the list' : null },
         h('button', { class: 'row', type: 'button', title: r.preview || '(empty)', 'aria-pressed': String(r.name === selected), onclick: () => onPick(r.name) },
           h('span', { class: 'name' }, r.name,
-            r.norun ? h('span', { class: 'norun-badge', title: 'No run from the Results filter matches this option' + (r.norun.out ? ` (${r.norun.out} filtered out)` : '') + '. Delete it from Results > Runs, or with Edit.' }, 'no runs') : ''),
+            r.norun ? h('span', { class: 'norun-badge', title: 'No run from the Results filter matches this option' + (r.norun.out ? ` (${r.norun.out} filtered out)` : '') + '. Delete it from Results > Runs, or with Edit.' }, 'No runs') : ''),
           h('code', {}, r.preview || '(empty)')),
         h('button', { class: 'tiny edit', type: 'button', 'aria-label': `Edit ${r.name}`, onclick: () => onEdit(r.name) }, 'Edit')))),
     footer || '');
@@ -830,7 +831,7 @@ function diffDialog(bid) {
         return [h('span', { class: 'df-lab' + diff, title: x.id }, x.label), h('span', { class: 'df-cell' + diff }, sel('a', x)), h('span', { class: 'df-cell' + diff }, sel('b', x))];
       }));
   }
-  const val = (v) => (v == null ? h('span', { class: 'hint' }, 'not set') : h('code', {}, v));
+  const val = (v) => (v == null ? h('span', { class: 'hint' }, 'Not set') : h('code', {}, v));
   async function run() {
     const my = ++seq;
     out.replaceChildren(h('p', { class: 'empty' }, 'Comparing...'));
@@ -845,11 +846,11 @@ function diffDialog(bid) {
       h('thead', {}, h('tr', {}, h('th', {}, 'Variable'), h('th', {}, 'A'), h('th', {}, 'B'))),
       h('tbody', {}, ...r.variables.map((v) => h('tr', {},
         h('td', { title: v.name }, short2(v.name)),
-        h('td', { title: v.a_by ? `set by ${v.a_by}` : '' }, val(v.a)),
-        h('td', { title: v.b_by ? `set by ${v.b_by}` : '' }, val(v.b))))))
+        h('td', { title: v.a_by ? `Set by ${v.a_by}` : '' }, val(v.a)),
+        h('td', { title: v.b_by ? `Set by ${v.b_by}` : '' }, val(v.b))))))
       : h('p', { class: 'hint' }, 'No variable differs.'));
     const n = r.config.reduce((k, hk) => k + hk.lines.filter((l) => l.s !== 'same').length, 0);
-    kids.push(h('h4', {}, 'Config the program gets', h('span', { class: 'hint' }, `  ${n ? `${n} lines differ` : 'identical'}  (- A, + B; base config + variables, as in the Config preview)`)));
+    kids.push(h('h4', {}, 'Config the Program Gets', h('span', { class: 'hint' }, `  ${n ? `${n} lines differ` : 'identical'}  (- A, + B; base config + variables, as in the Config preview)`)));
     for (const hk of r.config) {
       kids.push(h('div', { class: 'df-hunk' },
         h('div', { class: 'df-where' }, hk.where ? hk.where + ':' : '(top)', h('span', { class: 'hint' }, `  line ${hk.line} of A`)),
@@ -925,7 +926,7 @@ function listBody(b) {
     set(values.map((r) => r.name).filter((x) => now.includes(x)));   // in the order of the list
   };
   const mode = all ? h('div', { class: 'seg lb-mode', role: 'group', 'aria-label': `How ${b.label} is used` },
-    h('button', { type: 'button', 'aria-pressed': String(looping), title: `Run the command loop once per value ($${name} -> \${${lv}})`, onclick: () => set(all.name) }, `\u21bb Loop over all ${values.length}`),
+    h('button', { type: 'button', 'aria-pressed': String(looping), title: `Run the command loop once per value ($${name} -> \${${lv}})`, onclick: () => set(all.name) }, `\u21bb Loop over All ${values.length}`),
     h('button', { type: 'button', 'aria-pressed': String(!looping), title: 'Tick the values to use: one sets the variable, several are looped over',
       onclick: () => { if (looping) set([values[0].name]); } }, looping ? 'Selected' : `Selected (${picked.length})`)) : '';
   const n = picked.length;
@@ -944,8 +945,8 @@ function listBody(b) {
           h('span', { class: 'lb-text' }, h('span', { class: 'name' }, it.label || it.value), it.label ? h('code', {}, it.value) : '')));
     }));
   const tools = all && !looping ? h('div', { class: 'lb-tools' },
-    h('button', { type: 'button', class: 'tiny', onclick: () => set(all.name) }, 'all'),
-    h('button', { type: 'button', class: 'tiny', onclick: () => set([values[0].name]) }, 'only the first'),
+    h('button', { type: 'button', class: 'tiny', onclick: () => set(all.name) }, 'All'),
+    h('button', { type: 'button', class: 'tiny', onclick: () => set([values[0].name]) }, 'Only the First'),
     h('span', { class: 'hint' }, `${n} of ${values.length}`)) : '';
   return h('div', { class: 'lb' }, mode, say, tools, list);
 }
@@ -967,9 +968,9 @@ function drawStrip() {
         : b.kind === 'fixed' ? h('div', { class: 'card-vars fixed-vars', 'data-bid': bid, 'aria-label': `Variables applied to every run by ${b.label}` }, ...blockVars(b)) : null,
       footer: b.kind === 'fixed' ? null : h('div', { class: 'card-vars', 'data-bid': bid, 'aria-label': `Variables set by ${b.label}` }, ...blockVars(b)),
     }));
-  }
     if (b.kind === 'fixed') cards.push(h('div', { class: 'strip-sep', role: 'separator', title: 'Left: applied to every run. Right: the blocks whose options you pick.' }));
-  if (xp) cards.push(h('button', { class: 'addblock', type: 'button', onclick: addBlock }, '+ Add block'));
+  }
+  if (xp) cards.push(h('button', { class: 'addblock', type: 'button', onclick: addBlock }, '+ Add Block'));
   else cards.push(h('div', { class: 'empty' }, 'No XP yet. Create one in the side panel.'));
   const strip = $('#strip');
   const left = strip.scrollLeft;
@@ -990,7 +991,7 @@ function varField(group, v) {
   input.value = st.values[v.name] ?? table[v.name]?.value ?? v.value;
   const reset = h('button', { class: 'tiny reset', type: 'button', title: 'Back to the value from the config / selected options', hidden: '', onclick: () => {
     delete st.values[v.name]; setValue(input, table[v.name]?.value ?? v.value); reset.hidden = true; syncChips(); schedulePreview();
-  } }, 'reset');
+  } }, 'Reset');
   reset.hidden = st.values[v.name] === undefined;
   input.addEventListener('input', () => { st.values[v.name] = input.value; reset.hidden = false; syncChips(); schedulePreview(); });
   const chips = v.options.map((o) => h('button', {
@@ -1001,12 +1002,12 @@ function varField(group, v) {
     : v.name === cfg.project.config_var ? h('span', { class: 'cfg-btns' },
       h('button', { class: 'tiny', type: 'button', onclick: () => pickConfig(v.name, input) }, 'Browse'),
       h('button', { class: 'tiny', type: 'button', title: `A base config for this XP, written in ${genDir(st.xp)} (works whatever the commit)`, onclick: () => newConfig(input.value.trim()) }, 'New...'),
-      h('button', { class: 'tiny', type: 'button', 'data-genedit': '', title: 'Edit the base config written by the launcher', onclick: () => editConfigFile(input.value.trim()) }, 'Edit file')) : '';
+      h('button', { class: 'tiny', type: 'button', 'data-genedit': '', title: 'Edit the base config written by the launcher', onclick: () => editConfigFile(input.value.trim()) }, 'Edit File')) : '';
   // one line: scope | label (name under it) | value (+ where it comes from) | suggested values | buttons
   return h('div', { class: 'field vrow', 'data-var': v.name, 'data-search': `${v.label} ${v.name}`.toLowerCase() },
     h('span', { class: 'scope-badge', 'data-scope': v.name }),
     h('label', { for: 'f-' + v.name, class: 'vlabel', title: v.name }, v.label || short2(v.name), v.label ? h('code', {}, v.name) : '',
-      v.xp ? h('span', { class: 'xp-tag', title: v.xp === 'own' ? `A variable of ${st.xp} only` : `Edited for ${st.xp} only (Edit: "every XP" to change the shared variable)` }, v.xp === 'own' ? 'this XP only' : 'edited for this XP') : ''),
+      v.xp ? h('span', { class: 'xp-tag', title: v.xp === 'own' ? `A variable of ${st.xp} only` : `Edited for ${st.xp} only (Edit: "every XP" to change the shared variable)` }, v.xp === 'own' ? 'This XP only' : 'Edited for this XP') : ''),
     h('div', { class: 'vval' }, h('div', { class: 'field-row' }, input, reset), extra ? h('div', { class: 'vextra' }, extra) : '', h('span', { class: 'src', 'data-src': v.name })),
     h('div', { class: 'chips' }, ...chips),
     h('div', { class: 'vact' },
@@ -1026,20 +1027,20 @@ const varFilter = { text: '' };
 function drawVars() {
   const all = GROUPS.flatMap(([g]) => xpVars(g));
   shownVars = all.filter(important).map((v) => v.name).join(',');
-  const filter = h('input', { type: 'search', class: 'vfilter', placeholder: 'filter the variables (label, name)', value: varFilter.text, 'aria-label': 'Filter the variables' });
+  const filter = h('input', { type: 'search', class: 'vfilter', placeholder: 'Filter the variables (label, name)', value: varFilter.text, 'aria-label': 'Filter the variables' });
   filter.addEventListener('input', () => { varFilter.text = filter.value; applyFilter(); });
   $('#vars').replaceChildren(h('div', { class: 'vtools' }, filter, h('span', { class: 'hint' }, `${all.length} variables; the ones not used by this selection are folded`)),
     ...GROUPS.map(([g, title, note]) => {
       const vars = xpVars(g);
       const main = vars.filter(important), rest = vars.filter((v) => !important(v));
-      const more = rest.length ? h('details', { class: 'vmore' }, h('summary', {}, `${rest.length} more (defaults)`, h('span', { class: 'hint' }, ` ${rest.map((v) => v.label || short2(v.name)).join(', ')}`)),
+      const more = rest.length ? h('details', { class: 'vmore' }, h('summary', {}, `${rest.length} More (defaults)`, h('span', { class: 'hint' }, ` ${rest.map((v) => v.label || short2(v.name)).join(', ')}`)),
         h('div', { class: 'vtable' }, ...rest.map((v) => varField(g, v)))) : '';
       const d = h('details', { class: 'vgroup' },
         h('summary', {}, title, h('span', { class: 'hint' }, note)),
         g === 'run' ? h('div', { id: 'looppanel', class: 'looppanel' }) : '',
         h('div', { class: 'vtable' }, ...main.map((v) => varField(g, v))),
         more,
-        h('button', { class: 'ghost', type: 'button', onclick: () => editVar(g, null) }, '+ Add variable'));
+        h('button', { class: 'ghost', type: 'button', onclick: () => editVar(g, null) }, '+ Add Variable'));
       if (!closedGroups.has(g)) d.setAttribute('open', '');
       d.addEventListener('toggle', () => { if (d.open) closedGroups.delete(g); else closedGroups.add(g); });
       return d;
@@ -1069,7 +1070,7 @@ function applyTable() {
     const name = f.dataset.var, e = table[name], input = f.querySelector('textarea, input');
     if (e && st.values[name] === undefined && document.activeElement !== input && input.value !== e.value) setValue(input, e.value);
     const src = f.querySelector('.src');
-    src.textContent = e && !['default', 'edited'].includes(e.source) ? `set by ${e.source}` : '';
+    src.textContent = e && !['default', 'edited'].includes(e.source) ? `Set by ${e.source}` : '';
     const ge = f.querySelector('[data-genedit]');
     if (ge) ge.hidden = !isGenerated(e?.value || input.value);
     const badge = f.querySelector('.scope-badge');
@@ -1101,15 +1102,15 @@ function drawYaml(r) {
     return;
   }
   $('#pv-legend').replaceChildren(`${r.source}: `,
-    h('span', { class: 'yk changed', title: 'a variable replaced the value of the file (hover a line: which one; "was" shows the old value)' }, `${r.changed} changed`),
-    h('span', { class: 'yk added', title: 'a variable set a key the file does not have (also what a misspelt name looks like)' }, `${r.added} added`),
-    h('span', { class: 'yk same', title: 'as in the file and its subconfigs' }, 'unchanged'),
-    r.missing ? h('span', { class: 'yk missing', title: 'required arguments with no default and no value: the program would stop. Set them with Arguments' }, `${r.missing} missing`) : '');
+    h('span', { class: 'yk changed', title: 'A variable replaced the value of the file (hover a line: which one; "was" shows the old value)' }, `${r.changed} changed`),
+    h('span', { class: 'yk added', title: 'A variable set a key the file does not have (also what a misspelt name looks like)' }, `${r.added} added`),
+    h('span', { class: 'yk same', title: 'As in the file and its subconfigs' }, 'Unchanged'),
+    r.missing ? h('span', { class: 'yk missing', title: 'Required arguments with no default and no value: the program would stop. Set them with Arguments' }, `${r.missing} missing`) : '');
   box.replaceChildren(
     ...r.lines.map((ln) => h('div', { class: 'yl ' + ln.s, title: ln.by ? `${ln.s === 'added' ? 'added' : 'changed'} by ${ln.by}` : '' },
       h('span', { class: 'yt' }, ln.t),
-      ln.was !== undefined ? h('span', { class: 'yw' }, `was ${ln.was}`) : '',
-      ln.loop ? h('span', { class: 'yw' }, 'changes with the loop') : '')),
+      ln.was !== undefined ? h('span', { class: 'yw' }, `Was ${ln.was}`) : '',
+      ln.loop ? h('span', { class: 'yw' }, 'Changes with the loop') : '')),
     ...r.warnings.map((w) => h('p', { class: 'dlg-note pad' }, w)));
 }
 
@@ -1149,7 +1150,7 @@ async function fillRunOn() {
   let want = sel.value;
   try { if (!sel.dataset.filled) want = localStorage.getItem('xp-run-on') || ''; } catch (e) { /* storage unavailable */ }
   const servers = list.filter((s) => !s.disabled);
-  sel.replaceChildren(h('option', { value: '' }, 'this machine'),
+  sel.replaceChildren(h('option', { value: '' }, 'This machine'),
     ...servers.map((s) => h('option', { value: s.name }, s.name + (s.connected ? '' : ' (not connected)'))));
   sel.value = servers.some((s) => s.name === want) ? want : '';
   sel.dataset.filled = '1';

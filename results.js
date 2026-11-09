@@ -88,7 +88,7 @@
       h('button', { type: 'button', class: 'x', 'aria-label': `Remove ${m.label}`, onclick: () => saveMetrics(metricList().filter((_, j) => j !== i)) }, 'x')));
     const links = C.links || [];
     const data = h('div', { class: 'rs-controls rs-box' },
-      h('div', { class: 'rs-box-head' }, h('b', {}, 'Data'), h('span', { class: 'hint' }, 'the runs of this selection: the MLflow filter, the values kept below, and what each run is (dimensions, links)')),
+      h('div', { class: 'rs-box-head' }, h('b', {}, 'Data'), h('span', { class: 'hint' }, 'The runs of this selection: the MLflow filter, the values kept below, and what each run is (dimensions, links)')),
       h('div', { class: 'rs-line' },
         h('label', { class: 'grow', title: 'MLflow search filter, applied by MLflow to the runs of the experiment' }, 'Filter', filter),
         h('button', { type: 'button', class: 'ghost', onclick: applyFilter }, 'Apply'),
@@ -102,10 +102,10 @@
         h('button', { type: 'button', 'aria-pressed': String(R.view === v), onclick: () => setView(v) }, t))),
       h('span', { class: 'rs-key rs-views-k', title: 'Other figures of the same runs, each with its own settings' }, 'Views'),
       h('span', { class: 'seg' }, ...C.views.map((v) => h('button', { type: 'button', 'aria-pressed': String(R.view === 'v:' + v.id), onclick: () => setView('v:' + v.id) }, v.title))),
-      h('button', { type: 'button', class: 'tiny', title: 'Add a view: another figure of the same runs (training curves), with its own settings', onclick: addView }, '+ view'));
+      h('button', { type: 'button', class: 'tiny', title: 'Add a view: another figure of the same runs (training curves), with its own settings', onclick: addView }, '+ View'));
     if (R.view.startsWith('v:')) return h('div', {}, data, shows);
     return h('div', {}, data, h('div', { class: 'rs-controls rs-box' },
-      h('div', { class: 'rs-box-head' }, h('b', {}, 'Arrangement'), h('span', { class: 'hint' }, 'of the table and the plot: panels, columns and rows are dimensions')),
+      h('div', { class: 'rs-box-head' }, h('b', {}, 'Arrangement'), h('span', { class: 'hint' }, 'The table and the plot: panels, columns and rows are dimensions')),
       h('div', { class: 'rs-line' },
         h('label', {}, 'Panels', dimSelect(L.panel, (v) => setLayout({ panel: v }), [L.column, ...L.rows])),
         h('label', {}, 'Columns', dimSelect(L.column, (v) => setLayout({ column: v }), [L.panel, ...L.rows])),
@@ -113,10 +113,10 @@
         h('span', { class: 'sp' }),
         opt('scale', 'Scale ', [[100, 'x100'], [1, 'x1']]),
         opt('digits', 'Digits ', [[0, '0'], [1, '1'], [2, '2'], [3, '3']]),
-        opt('std', '', [[true, 'mean ± std'], [false, 'mean']]),
-        opt('missing', '', [[true, 'all values'], [false, 'values with runs']])),
+        opt('std', '', [[true, 'Mean ± std'], [false, 'Mean']]),
+        opt('missing', '', [[true, 'All values'], [false, 'Values with runs']])),
       h('div', { class: 'rs-line' }, h('span', { class: 'rs-key' }, 'Metrics'), ...metrics,
-        h('button', { type: 'button', class: 'tiny', onclick: addMetric }, '+ metric'))), shows);
+        h('button', { type: 'button', class: 'tiny', onclick: addMetric }, '+ Metric'))), shows);
   }
 
   /* ---------- selections: several ways to look at the runs of the XP ---------- */
@@ -125,10 +125,10 @@
     const C = conf();
     const go = (id) => { R.sel = id; R.data = null; R.out = {}; load(false); };
     const edit = (copy) => openDialog({
-      title: copy === null ? `Rename the selection "${C.selection_title}"` : 'New selection',
+      title: copy === null ? `Rename the Selection "${C.selection_title}"` : 'New Selection',
       fields: [{ key: 'title', label: 'Title', value: copy === null ? C.selection_title : '' },
         ...(copy === null ? [] : [{ key: 'from', type: 'select', label: 'Start from', value: 'copy',
-          options: [{ value: 'copy', label: `a copy of "${C.selection_title}" (filter, values kept, rows/columns, metrics, views)` }, { value: 'empty', label: 'the defaults' }] }])],
+          options: [{ value: 'copy', label: `A copy of "${C.selection_title}" (filter, values kept, rows/columns, metrics, views)` }, { value: 'empty', label: 'The defaults' }] }])],
       submitLabel: copy === null ? 'Rename' : 'Add',
       onSubmit: async (v) => {
         const title = v.title.trim();
@@ -153,7 +153,7 @@
     }, { deleted: `selection "${C.selection_title}"` }).then(() => go(null)).catch((e) => status(e.message, true));
     return h('div', { class: 'rs-sels' }, h('span', { class: 'rs-key' }, 'Selection'),
       ...C.selections.map((x) => h('button', { type: 'button', class: 'rs-sel', 'aria-pressed': String(x.id === C.selection), onclick: () => go(x.id) }, x.title)),
-      h('button', { type: 'button', class: 'tiny', title: 'Another way to look at the runs: its own filter, values, rows/columns, metrics and views', onclick: () => edit(true) }, '+ selection'),
+      h('button', { type: 'button', class: 'tiny', title: 'Another way to look at the runs: its own filter, values, rows/columns, metrics and views', onclick: () => edit(true) }, '+ Selection'),
       h('span', { class: 'sp' }),
       h('button', { type: 'button', class: 'tiny', onclick: () => edit(null) }, 'Rename'),
       C.selections.length > 1 ? h('button', { type: 'button', class: 'tiny danger', onclick: del }, 'Delete') : '');
@@ -194,7 +194,7 @@
           const stat = inf && inf.param === l.param
             ? `${inf.found}/${inf.runs} runs linked, to ${inf.parents} run${inf.parents > 1 ? 's' : ''} of ${Object.keys(inf.experiments).join(', ') || '?'}`
               + (inf.with_id > inf.found ? ` (${inf.with_id - inf.found} run ids not found in MLflow)` : '')
-            : 'saved and read again when you Save';
+            : 'Saved and read again when you Save';
           const axes = inf && inf.param === l.param ? inf.axes : [];
           return h('div', { class: 'lk-item' },
             h('div', { class: 'lk-row' }, h('label', {}, 'Name', name), h('label', { class: 'grow' }, 'Parameter that holds the run id', param),
@@ -206,12 +206,12 @@
                 ...[['rows', '+ Rows'], ['column', 'Columns'], ['panel', 'Panels']].map(([w, t]) => h('button', { type: 'button', class: 'tiny',
                   onclick: async () => { d.close(); await useAxis(`${l.name} ${a.name}`, a.column, w); } }, t))))) : '');
         }),
-        h('button', { type: 'button', class: 'tiny', onclick: () => { draft.push({ name: draft.some((x) => x.name === 'ckpt') ? `link${draft.length + 1}` : 'ckpt', param: (C.id_params || [])[0] || params[0] || '' }); paintBody(); } }, '+ link'));
+        h('button', { type: 'button', class: 'tiny', onclick: () => { draft.push({ name: draft.some((x) => x.name === 'ckpt') ? `link${draft.length + 1}` : 'ckpt', param: (C.id_params || [])[0] || params[0] || '' }); paintBody(); } }, '+ Link'));
     };
     paintBody();
     d.replaceChildren(h('div', { class: 'df-wrap' },
-      h('div', { class: 'pk-head' }, h('h3', { id: 'links-title' }, 'Links between runs'), h('span', { class: 'sp' }),
-        C.links_saved ? h('button', { type: 'button', class: 'ghost', title: 'Forget the saved links: detect them from the runs again', onclick: async () => { d.close(); await saveResults({ links: undefined }); } }, 'Detect again') : '',
+      h('div', { class: 'pk-head' }, h('h3', { id: 'links-title' }, 'Links Between Runs'), h('span', { class: 'sp' }),
+        C.links_saved ? h('button', { type: 'button', class: 'ghost', title: 'Forget the saved links: detect them from the runs again', onclick: async () => { d.close(); await saveResults({ links: undefined }); } }, 'Detect Again') : '',
         h('button', { type: 'button', class: 'primary', onclick: async () => { d.close(); await saveResults({ links: draft.filter((l) => l.name && l.param) }); } }, 'Save'),
         h('button', { type: 'button', class: 'ghost', onclick: () => d.close() }, 'Close')),
       h('p', { class: 'dlg-note' }, 'A link joins a run with the run it uses, e.g. the training run of its checkpoint: a parameter of the run holds the MLflow run id of the other run '
@@ -255,7 +255,7 @@
     const custom = C.readme?.[key];
     const text = custom || (view ? (view.type === 'artifact' ? artifactReadme(view) : curvesReadme(view)) : README[key]) || '';
     const edit = () => openDialog({
-      title: `What this view shows (${view ? view.title : key})`,
+      title: `What This View Shows (${view ? view.title : key})`,
       wide: true,
       fields: [{ key: 'text', type: 'area', rows: 8, label: 'Explanation shown above the view (empty: the default text)', value: custom || text }],
       onSubmit: async (v) => {
@@ -265,7 +265,7 @@
       },
     });
     return h('div', { class: 'rs-readme' }, h('span', { class: 'rs-readme-k' }, 'About this view'),
-      h('p', {}, text), h('button', { type: 'button', class: 'tiny', title: custom ? 'your text' : 'default text: edit to write your own', onclick: edit }, custom ? 'Edit' : 'Edit (default text)'));
+      h('p', {}, text), h('button', { type: 'button', class: 'tiny', title: custom ? 'Your text' : 'Default text: edit to write your own', onclick: edit }, custom ? 'Edit' : 'Edit (default text)'));
   }
 
   /* ---------- views (more figures): training curves ---------- */
@@ -280,13 +280,13 @@
     const linked = links.map((l) => [l.name, metricsOf(l.name).filter((k) => /^train\//.test(k))]).find(([, ks]) => ks.length);
     const source = own.length || !linked ? '' : linked[0];
     openDialog({
-      title: 'Add a view',
+      title: 'Add a View',
       fields: [
         { key: 'title', label: 'Title', value: 'Training curves' },
         { key: 'type', type: 'select', label: 'Kind', value: 'curves', options: [{ value: 'curves', label: 'Training curves: metric histories, averaged per group' },
           { value: 'artifact', label: 'An artifact of each run (a PDF plot, an image, a config...), side by side' }] },
         { key: 'source', type: 'select', label: 'Runs', value: source,
-          options: [{ value: '', label: `the runs of ${C.experiment}` }, ...links.map((l) => ({ value: l.name, label: `the runs linked by ${l.name} (${l.param})` }))] },
+          options: [{ value: '', label: `The runs of ${C.experiment}` }, ...links.map((l) => ({ value: l.name, label: `The runs linked by ${l.name} (${l.param})` }))] },
         { type: 'note', label: 'Training curves: the metrics, groups (color, panels) and smoothing are set in the view. Artifact: the file is chosen in the view, among the artifacts of the runs (Runs: the runs of the selection). Each view has its own text explaining it, shown above it.' },
       ],
       submitLabel: 'Add',
@@ -327,8 +327,8 @@
     const metrics = v.metrics.map((k, i) => h('span', { class: 'rs-chip metric' }, h('span', { class: 'sw m' + ((i % 6) + 1) }), k,
       h('button', { type: 'button', class: 'x', 'aria-label': `Remove ${k}`, onclick: () => saveView({ metrics: v.metrics.filter((_, j) => j !== i) }) }, 'x')));
     const add = () => openChooser({
-      title: 'Add a metric (its history is plotted)',
-      load: async () => ({ note: v.source ? `metrics of the runs linked by ${v.source}` : `metrics logged by the runs of ${C.experiment}`,
+      title: 'Add a Metric (its history is plotted)',
+      load: async () => ({ note: v.source ? `Metrics of the runs linked by ${v.source}` : `Metrics logged by the runs of ${C.experiment}`,
         items: metricsOf(v.source).filter((k) => !k.startsWith('system/')).map((k) => ({ value: k, label: k, group: k.split('/')[0] })) }),
       onPick: (k) => saveView({ metrics: [...v.metrics, k] }),
     });
@@ -339,16 +339,16 @@
     return h('div', { class: 'rs-controls' },
       h('div', { class: 'rs-line' },
         h('label', {}, 'Title', title),
-        h('label', {}, 'Runs', sel(v.source, [['', 'the runs'], ...(C.links || []).map((l) => [l.name, `linked by ${l.name}`])], (x) => saveView({ source: x }))),
+        h('label', {}, 'Runs', sel(v.source, [['', 'The runs'], ...(C.links || []).map((l) => [l.name, `Linked by ${l.name}`])], (x) => saveView({ source: x }))),
         h('label', {}, 'x', sel(v.x, [['step', 'step'], ['epoch', 'epoch']], (x) => saveView({ x }))),
         h('label', {}, 'Color', dimSelect(v.color, (x) => saveView({ color: x }), [v.panel])),
         h('label', {}, 'Panels', dimSelect(v.panel, (x) => saveView({ panel: x }), [v.color])),
         h('span', { class: 'sp' }),
         h('label', {}, 'Smooth ', sel(v.smooth, [[0, 'none'], [0.5, '0.5'], [0.6, '0.6'], [0.8, '0.8'], [0.9, '0.9'], [0.95, '0.95']], (x) => saveView({ smooth: Number(x) }))),
-        sel(v.std, [[true, 'mean ± std'], [false, 'mean']], (x) => saveView({ std: x === 'true' })),
+        sel(v.std, [[true, 'Mean ± std'], [false, 'Mean']], (x) => saveView({ std: x === 'true' })),
         sel(v.logy, [[false, 'linear y'], [true, 'log y']], (x) => saveView({ logy: x === 'true' })),
-        h('button', { type: 'button', class: 'tiny danger', onclick: del }, 'Delete view')),
-      h('div', { class: 'rs-line' }, h('span', { class: 'rs-key' }, 'Metrics'), ...metrics, h('button', { type: 'button', class: 'tiny', onclick: add }, '+ metric')));
+        h('button', { type: 'button', class: 'tiny danger', onclick: del }, 'Delete View')),
+      h('div', { class: 'rs-line' }, h('span', { class: 'rs-key' }, 'Metrics'), ...metrics, h('button', { type: 'button', class: 'tiny', onclick: add }, '+ Metric')));
   }
 
   /* ---------- artifact views: one file of each run (a PDF plot, an image, a text), side by side ---------- */
@@ -385,12 +385,12 @@
     size.value = v.size || 'm';
     size.addEventListener('change', () => saveView({ size: size.value }));
     const pick = () => openChooser({
-      title: 'Artifact to show for each run',
+      title: 'Artifact to Show for Each Run',
       current: v.path,
       load: async () => {
         const r = await api('/api/report/artifacts', { sel: selq() });
         ART.lists[selKey()] = r;
-        return { note: `the files of ${r.runs} run(s)` + (r.total_runs > r.runs ? ` (the first ${r.runs} of ${r.total_runs})` : '')
+        return { note: `The files of ${r.runs} run(s)` + (r.total_runs > r.runs ? ` (the first ${r.runs} of ${r.total_runs})` : '')
             + (r.unreadable ? `; ${r.unreadable} run(s) whose files are not reachable from here` : '') + '. The number: how many runs have it.',
           items: r.paths.map((x) => ({ value: x.path, label: x.path, sub: `${x.runs} run(s) · up to ${fmtSize(x.size)}`, group: x.path.includes('/') ? x.path.split('/').slice(0, -1).join('/') : '(top)', tags: [extOf(x.path) || 'file'] })) };
       },
@@ -404,14 +404,14 @@
     return h('div', { class: 'rs-controls' },
       h('div', { class: 'rs-line' },
         h('label', {}, 'Title', title),
-        h('span', { class: 'rs-key' }, 'File'), v.path ? h('code', {}, v.path) : h('span', { class: 'hint' }, 'none yet'),
+        h('span', { class: 'rs-key' }, 'File'), v.path ? h('code', {}, v.path) : h('span', { class: 'hint' }, 'None yet'),
         h('button', { type: 'button', class: 'tiny' + (v.path ? '' : ' primary'), onclick: pick }, v.path ? 'Change' : 'Choose a file'),
         found ? h('span', { class: 'hint' }, `${found.runs} of ${list.runs} run(s) have it`) : '',
         h('label', {}, 'Rows', dimSelect(v.group, (x) => saveView({ group: x }))),
         h('label', {}, 'Size', size),
         h('span', { class: 'sp' }),
-        h('button', { type: 'button', class: 'tiny', title: 'List the files of the runs again (new artifacts)', onclick: () => { ART.texts = {}; artifactList(true); paint(); } }, 'Reload files'),
-        h('button', { type: 'button', class: 'tiny danger', onclick: del }, 'Delete view')));
+        h('button', { type: 'button', class: 'tiny', title: 'List the files of the runs again (new artifacts)', onclick: () => { ART.texts = {}; artifactList(true); paint(); } }, 'Reload Files'),
+        h('button', { type: 'button', class: 'tiny danger', onclick: del }, 'Delete View')));
   }
 
   function artifactCell(v, r) {
@@ -459,7 +459,7 @@
     const card = (r) => h('figure', { class: 'rs-art-card' + (have.has(r.id) ? '' : ' missing') },
       h('figcaption', {}, ...others.map((d) => h('span', { class: 'rs-art-lab', title: d.name }, String(r.labels[d.name] ?? ''))),
         h('a', { class: 'hint', href: window.XPRouter?.href({ tab: 'mlflow', mlflow: `/experiments/${D.experiment_id}/runs/${r.id}` }) || '#', title: 'Open the run in the MLflow tab' }, r.name || r.id.slice(0, 8))),
-      have.has(r.id) ? artifactCell(v, r) : h('p', { class: 'hint' }, `no ${v.path.split('/').pop()} in this run`));
+      have.has(r.id) ? artifactCell(v, r) : h('p', { class: 'hint' }, `No ${v.path.split('/').pop()} in this run`));
     return h('div', { class: 'rs-art ' + (v.size || 'm') },
       missing ? h('p', { class: 'hint' }, `${runs.length - missing} of ${runs.length} run(s) have ${v.path}` + (list.total_runs > list.runs ? ` (files listed for the first ${list.runs} runs)` : '') + '.') : '',
       ...[...groups.entries()].map(([g, rs]) => h('section', { class: 'rs-art-group' },
@@ -549,11 +549,11 @@
       const hidden = new Set(L.hide[d.name] || []);
       const vals = D.order[d.name] || [];
       const head = groups.length > 1 && (i === 0 || dimGroup(all[i - 1]) !== dimGroup(d)) ? [h('div', { class: 'rs-group-k' }, dimGroup(d))] : [];
-      return [...head, h('div', { class: 'rs-filter' }, h('span', { class: 'rs-key', title: d.block ? `from the block ${blk(d.block)?.label || d.block}` : d.param || 'rules' }, d.name),
+      return [...head, h('div', { class: 'rs-filter' }, h('span', { class: 'rs-key', title: d.block ? `From the block ${blk(d.block)?.label || d.block}` : d.param || 'rules' }, d.name),
         ...vals.map((v) => {
           const n = D.counts[d.name]?.[v] || 0;
           return h('button', { type: 'button', class: 'chip' + (n ? '' : ' empty') + (v === OTHER ? ' other' : ''), 'aria-pressed': String(!hidden.has(v)),
-            title: v === OTHER ? 'runs that match no value of this dimension' : `${n} run(s); click to leave out / bring back`,
+            title: v === OTHER ? 'Runs that match no value of this dimension' : `${n} run(s); click to leave out / bring back`,
             onclick: () => {
               const now = new Set(hidden);
               if (now.has(v)) now.delete(v); else now.add(v);
@@ -561,15 +561,15 @@
             } }, `${v} `, h('small', {}, String(n)));
         }))];
     });
-    return h('details', { class: 'rs-filters', open: '' }, h('summary', {}, 'Values kept (run counts; click a value to leave it out)'), ...kids);
+    return h('details', { class: 'rs-filters', open: '' }, h('summary', {}, 'Values Kept (run counts; click a value to leave it out)'), ...kids);
   }
 
   /* ---------- metrics ---------- */
 
   function addMetric() {
     openChooser({
-      title: 'Add a metric',
-      load: async () => ({ note: `metrics logged by the runs of ${conf().experiment}`,
+      title: 'Add a Metric',
+      load: async () => ({ note: `Metrics logged by the runs of ${conf().experiment}`,
         items: R.data.available_metrics.map((k) => ({ value: k, label: k, group: k.split('/').slice(0, -2).join('/') })) }),
       onPick: (k) => {
         const parts = k.split('/');
@@ -615,7 +615,7 @@
         const err = test.errors[`${dn}\u0000${vl}`];
         const errEl = el.parentElement.querySelector('.rs-rule-err');
         if (errEl) errEl.textContent = err || '';
-        if (d && vl === OTHER) el.textContent = n ? `${n} run${n === 1 ? '' : 's'} match no value` : 'every run has a value';
+        if (d && vl === OTHER) el.textContent = n ? `${n} run${n === 1 ? '' : 's'} match no value` : 'Every run has a value';
       });
     };
     const move = (arr, i, j) => { if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; };
@@ -625,7 +625,7 @@
         name.value = d.name;
         name.addEventListener('change', () => { d.name = name.value.trim() || d.name; setTimeout(() => { paintList(); retest(); }, 0); });
         const head = h('div', { class: 'rs-dhead' }, name,
-          h('span', { class: 'hint' }, d.block ? `from the block ${blk(d.block)?.label || d.block}` : d.param ? 'values of a parameter' : 'values defined by MLflow filters'),
+          h('span', { class: 'hint' }, d.block ? `From the block ${blk(d.block)?.label || d.block}` : d.param ? 'Values of a parameter' : 'Values defined by MLflow filters'),
           h('span', { class: 'sp' }),
           h('button', { type: 'button', class: 'tiny', 'aria-label': 'Move up', onclick: () => { move(draft, di, di - 1); paintList(); } }, '↑'),
           h('button', { type: 'button', class: 'tiny', 'aria-label': 'Move down', onclick: () => { move(draft, di, di + 1); paintList(); } }, '↓'),
@@ -634,7 +634,7 @@
           const param = h('select', {}, ...R.data.params.map((k) => h('option', { value: k }, k)));
           param.value = d.param.startsWith('params.') ? d.param : 'params.' + d.param;
           param.addEventListener('change', () => { d.param = param.value; retest(); });
-          const labels = autoGrow(h('textarea', { class: 'mono', spellcheck: 'false', placeholder: 'raw value = label (one per line, optional)' }), 2);
+          const labels = autoGrow(h('textarea', { class: 'mono', spellcheck: 'false', placeholder: 'Raw value = label (one per line, optional)' }), 2);
           labels.value = Object.entries(d.labels || {}).map(([k, v]) => `${k} = ${v}`).join('\n');
           labels.addEventListener('input', () => {
             d.labels = Object.fromEntries(labels.value.split('\n').map((l) => l.split(' = ')).filter((x) => x.length === 2 && x[0].trim()).map(([k, v]) => [k.trim(), v.trim()]));
@@ -648,7 +648,7 @@
           lab.value = v.label;
           lab.addEventListener('change', () => { v.label = lab.value.trim() || v.label; setTimeout(() => { paintList(); retest(); }, 0); });
           const rule = autoGrow(h('textarea', { class: 'mono', spellcheck: 'false', 'aria-label': `MLflow filter for ${v.label}`,
-            placeholder: 'empty: every run (put it last)' }));
+            placeholder: 'Empty: every run (put it last)' }));
           rule.value = v.rule;
           rule.addEventListener('input', () => { v.rule = rule.value; retest(); });
           return h('div', { class: 'rs-val' }, lab, h('div', {}, rule, h('div', { class: 'rs-rule-err' })),
@@ -660,7 +660,7 @@
         });
         return h('div', { class: 'rs-dim' }, head, ...rows,
           h('div', { class: 'rs-dfoot' },
-            h('button', { type: 'button', class: 'tiny', onclick: () => { let i = d.values.length + 1; while (d.values.some((x) => x.label === `value ${i}`)) i += 1; d.values.push({ label: `value ${i}`, rule: '' }); paintList(); retest(); } }, '+ value'),
+            h('button', { type: 'button', class: 'tiny', onclick: () => { let i = d.values.length + 1; while (d.values.some((x) => x.label === `value ${i}`)) i += 1; d.values.push({ label: `Value ${i}`, rule: '' }); paintList(); retest(); } }, '+ Value'),
             h('span', { class: 'hint', 'data-count': `${d.name}\u0000${OTHER}` })));
       }));
       paintCounts();
@@ -687,12 +687,12 @@
         + 'Counts are updated as you type, on the runs of the filter. Dimensions start from the blocks; saved ones no longer follow block changes (Reset to go back).'),
       list,
       h('div', { class: 'dlg-actions' },
-        h('button', { type: 'button', class: 'ghost', onclick: () => { draft.push({ name: uniqueName('New dimension'), values: [{ label: 'value 1', rule: '' }] }); paintList(); retest(); } }, '+ dimension (filters)'),
-        h('button', { type: 'button', class: 'ghost', onclick: () => openChooser({ title: 'Dimension from a parameter', load: async () => ({ items: R.data.params.map((k) => ({ value: k, label: k })) }),
-          onPick: (k) => { draft.push({ name: uniqueName(k.split('.').slice(-1)[0]), param: k, labels: {} }); paintList(); retest(); } }) }, '+ dimension (parameter values)'),
+        h('button', { type: 'button', class: 'ghost', onclick: () => { draft.push({ name: uniqueName('New dimension'), values: [{ label: 'Value 1', rule: '' }] }); paintList(); retest(); } }, '+ Dimension (filters)'),
+        h('button', { type: 'button', class: 'ghost', onclick: () => openChooser({ title: 'Dimension from a Parameter', load: async () => ({ items: R.data.params.map((k) => ({ value: k, label: k })) }),
+          onPick: (k) => { draft.push({ name: uniqueName(k.split('.').slice(-1)[0]), param: k, labels: {} }); paintList(); retest(); } }) }, '+ Dimension (parameter values)'),
         h('span', { class: 'sp' }),
         h('button', { type: 'button', class: 'danger', title: 'Forget the saved dimensions: use (and follow) the blocks of the XP',
-          onclick: async () => { dlgEl.close(); await saveResults({ dimensions: [] }); } }, 'Reset to the blocks'))));
+          onclick: async () => { dlgEl.close(); await saveResults({ dimensions: [] }); } }, 'Reset to the Blocks'))));
     paintList();
     dlgEl.showModal();
   }
@@ -713,7 +713,7 @@
           const x = row.cells[c]?.[m.key];
           const b = p.best[`${c}\u0000${m.key}`];
           const best = x && b != null && Math.abs(x.mean - b) < 1e-9;
-          return h('td', { class: 'num' + (mi === 0 ? ' first' : '') + (best ? ' best' : '') + (x ? '' : ' missing'), title: x ? `n=${x.n}` : 'no run' },
+          return h('td', { class: 'num' + (mi === 0 ? ' first' : '') + (best ? ' best' : '') + (x ? '' : ' missing'), title: x ? `n=${x.n}` : 'No run' },
             ...(x ? [fmt(x.mean), lay().std && x.sd != null ? h('small', {}, ' ±' + fmt(x.sd)) : '', x.n > 1 ? h('sup', {}, String(x.n)) : ''] : ['—']));
         }))));
       out.push(h('div', { class: 'rs-panel' }, s.panel ? h('h3', {}, `${s.panel}: ${p.value}`) : '',
@@ -782,20 +782,20 @@
       kids.push(box, h('div', { class: 'rs-actions' },
         h('button', { type: 'button', class: 'ghost', onclick: async () => { try { await navigator.clipboard.writeText(e.res.tex); status('LaTeX copied'); } catch (x) { status('Copy failed: use Download', true); } } }, 'Copy LaTeX'),
         h('button', { type: 'button', class: 'ghost', onclick: () => saveText(`${stem}-table.tex`, e.res.tex, 'text/x-tex') }, 'Download .tex')),
-      h('details', { class: 'rs-code' }, h('summary', {}, 'LaTeX written by the script'), h('pre', { class: 'rs-script' }, e.res.tex)));
+      h('details', { class: 'rs-code' }, h('summary', {}, 'LaTeX Written by the Script'), h('pre', { class: 'rs-script' }, e.res.tex)));
     } else {
       const all = e.res.files.find((f) => f.name.endsWith('-all.pdf'));
-      kids.push(h('div', { class: 'rs-actions' }, all ? h('button', { type: 'button', class: 'ghost', onclick: () => saveBlob(all.name, b64blob(all.b64, 'application/pdf')) }, 'Download all (PDF)') : ''),
+      kids.push(h('div', { class: 'rs-actions' }, all ? h('button', { type: 'button', class: 'ghost', onclick: () => saveBlob(all.name, b64blob(all.b64, 'application/pdf')) }, 'Download All (PDF)') : ''),
         ...figures(e.res, true));
     }
-    if (e.res?.log) kids.push(h('details', { class: 'rs-code' }, h('summary', {}, 'Output of the script'), h('pre', { class: 'rs-script' }, e.res.log)));
+    if (e.res?.log) kids.push(h('details', { class: 'rs-code' }, h('summary', {}, 'Output of the Script'), h('pre', { class: 'rs-script' }, e.res.log)));
     const script = h('details', { class: 'rs-code' }, h('summary', {}, `${stem}-report.py (queries MLflow; python ${stem}-report.py [folder] [--table] [--plot])`),
       h('pre', { class: 'rs-script' }, R.data.script));
     script.open = !!e.pending;                       // shown while it runs
     return h('div', { class: 'rs-side' },
       h('div', { class: 'rs-side-head' }, h('h3', {}, what === 'table' ? 'Table made by the script' : 'Figures made by the script'),
         what.startsWith('view:') ? h('span', { class: 'hint' }, `python ${stem}-report.py out --view ${what.slice(5)}`) : '',
-        h('span', { class: 'sp' }), h('button', { type: 'button', class: 'ghost', onclick: () => saveText(`${stem}-report.py`, R.data.script, 'text/x-python') }, 'Download the script')),
+        h('span', { class: 'sp' }), h('button', { type: 'button', class: 'ghost', onclick: () => saveText(`${stem}-report.py`, R.data.script, 'text/x-python') }, 'Download the Script')),
       ...kids, script);
   }
 
@@ -906,12 +906,12 @@
       onclick: () => { runsShow = runsShow === key ? 'all' : key; paint(); } }, h('b', {}, String(value)), h('span', {}, label), sub ? h('small', {}, sub) : '');
     const filter = (conf().filter || '').trim();
     const stats = h('div', { class: 'rs-stats' },
-      stat('all', D.runs.length, 'runs', 'from the filter'),
-      stat('excluded', excluded.length, 'filtered out', D.excluded_error ? `could not list them: ${D.excluded_error}`
-        : filter ? `runs of the experiment the filter leaves out (${filter})` : 'no filter: every run of the experiment is used', excluded.length ? 'info' : 'ok'),
-      stat('unmatched', unmatched.length, 'unmatched', byDim.map(([n, k]) => `${n}: ${k}`).join(', ') || 'every run has a value everywhere', unmatched.length ? 'warn' : 'ok'),
-      stat('all', sorted.length, 'configurations', 'distinct combinations of the dimensions'),
-      stat('repeated', repeated.length, 'repeated', repeated.length ? `up to ${most} runs for one configuration` : 'one run per configuration', repeated.length ? 'info' : 'ok'));
+      stat('all', D.runs.length, 'runs', 'From the filter'),
+      stat('excluded', excluded.length, 'filtered out', D.excluded_error ? `Could not list them: ${D.excluded_error}`
+        : filter ? `Runs of the experiment the filter leaves out (${filter})` : 'No filter: every run of the experiment is used', excluded.length ? 'info' : 'ok'),
+      stat('unmatched', unmatched.length, 'unmatched', byDim.map(([n, k]) => `${n}: ${k}`).join(', ') || 'Every run has a value everywhere', unmatched.length ? 'warn' : 'ok'),
+      stat('all', sorted.length, 'configurations', 'Distinct combinations of the dimensions'),
+      stat('repeated', repeated.length, 'repeated', repeated.length ? `Up to ${most} runs for one configuration` : 'One run per configuration', repeated.length ? 'info' : 'ok'));
     const sortGroups = (m) => [...m.entries()].sort(([, a], [, b]) => {
       for (const d of dims) { const x = rank(d, a[0].labels[d.name]) - rank(d, b[0].labels[d.name]); if (x) return x; }
       return 0;
@@ -924,7 +924,7 @@
     const byReason = () => [...reasons.values()].sort((x, y) => y.length - x.length)
       .map((rs) => [whyKey(rs[0]), sortGroups(groupsOf(rs)).flatMap(([, g]) => g)]);
     const whyChips = (r) => h('span', { class: 'rs-why' },
-      ...(r.why || []).map((w) => h('span', { class: 'rs-why-c', title: `the run fails this condition of the filter; its value: ${w.got}` },
+      ...(r.why || []).map((w) => h('span', { class: 'rs-why-c', title: `The run fails this condition of the filter; its value: ${w.got}` },
         h('code', {}, w.cond), ' ', h('b', {}, w.got === 'not set' ? 'not set' : `is ${w.got}`))));
     const comboLine = (r) => h('span', { class: 'rs-combo-line' }, dims.map((d) => (r.labels[d.name] === OTHER ? `${d.name}: no value` : r.labels[d.name])).join(' · '));
     const reasonList = runsShow === 'excluded' ? h('div', { class: 'rs-reasons' }, h('span', { class: 'rs-key' }, 'Why'),
@@ -944,7 +944,7 @@
           h('span', { class: 'rs-combo' }, ...dims.map((d) => h('span', { class: 'rs-lab' + (first.labels[d.name] === OTHER ? ' other' : ''), title: d.name },
             first.labels[d.name] === OTHER ? `${d.name}: no value` : first.labels[d.name]))),
           h('span', { class: 'rs-count-badge' + (rs.length > 1 ? ' many' : '') }, rs.length > 1 ? `${rs.length} runs` : '1 run'),
-          dims.some((d) => d.block) ? h('button', { type: 'button', class: 'tiny', title: 'Select these options in the Launcher tab', onclick: () => selectInLauncher(first) }, 'Select in launcher') : '')));
+          dims.some((d) => d.block) ? h('button', { type: 'button', class: 'tiny', title: 'Select these options in the Launcher tab', onclick: () => selectInLauncher(first) }, 'Select in Launcher') : '')));
       for (const r of rs) {
         const open = () => openMlflow(`#/experiments/${D.experiment_id}/runs/${r.id}`);
         const idChip = h('button', { type: 'button', class: 'rs-id', title: `${r.id}\nclick to copy the run id` }, r.id.slice(0, 8));
@@ -1014,10 +1014,10 @@
       h('div', { class: 'rs-noruns-head' }, h('b', {}, `${list.length} block option${list.length > 1 ? 's' : ''} without runs`),
         h('span', { class: 'hint' }, ' no run from the filter matches them (the filter of each option is in Dimensions...)'),
         h('span', { class: 'sp' }),
-        h('button', { type: 'button', class: 'tiny danger', onclick: () => deleteOptions(list) }, `Delete all ${list.length}`)),
+        h('button', { type: 'button', class: 'tiny danger', onclick: () => deleteOptions(list) }, `Delete All ${list.length}`)),
       ...blocks.map((bid) => h('div', { class: 'rs-noruns-row' }, h('span', { class: 'rs-key' }, list.find((x) => x.bid === bid).block),
         ...list.filter((x) => x.bid === bid).map((x) => h('span', { class: 'rs-norun' }, x.name,
-          x.out ? h('small', { title: 'runs that match this option but that the filter leaves out' }, ` ${x.out} filtered out`) : '',
+          x.out ? h('small', { title: 'Runs that match this option but that the filter leaves out' }, ` ${x.out} filtered out`) : '',
           h('button', { type: 'button', class: 'x', 'aria-label': `Delete the option ${x.name} of ${x.block}`, title: 'Delete this option', onclick: () => deleteOptions([x]) }, '×'))))));
   }
 
@@ -1042,7 +1042,7 @@
       h('button', { type: 'button', class: 'ghost', onclick: () => { R.out = {}; load(true); } }, R.loading ? 'Loading...' : 'Refresh'));
     if (R.switchError) {
       box.replaceChildren(head, switchNote(), h('button', { type: 'button', class: 'ghost', onclick: () => { R.switchError = ''; load(true); } },
-        `Show the runs of the ${R.source?.label || 'database'} instead`));
+        `Show the Runs of the ${R.source?.label || 'database'} Instead`));
       return;
     }
     if (R.error) { box.replaceChildren(head, h('pre', { class: 'dlg-err' }, R.error)); return; }
@@ -1061,12 +1061,12 @@
     const view = curView();
     if (view?.type === 'artifact') body = h('div', {}, artifactControls(view), artifactGrid(view));
     else if (view) {
-      const left = h('div', { class: 'rs-side' }, h('div', { class: 'rs-side-head' }, h('h3', {}, 'Preview'), h('span', { class: 'hint' }, 'computed by the launcher')),
+      const left = h('div', { class: 'rs-side' }, h('div', { class: 'rs-side-head' }, h('h3', {}, 'Preview'), h('span', { class: 'hint' }, 'Computed by the launcher')),
         curvesPreview(view));
       body = h('div', {}, curvesControls(view), h('div', { class: 'rs-two' }, left, scriptPane('view:' + view.id)));
     } else if (R.view === 'runs') body = runsView();
     else {
-      const left = h('div', { class: 'rs-side' }, h('div', { class: 'rs-side-head' }, h('h3', {}, 'Preview'), h('span', { class: 'hint' }, 'computed by the launcher, instantly')),
+      const left = h('div', { class: 'rs-side' }, h('div', { class: 'rs-side-head' }, h('h3', {}, 'Preview'), h('span', { class: 'hint' }, 'Computed by the launcher, instantly')),
         R.view === 'plot' ? previewPlotPane() : previewTable());
       body = h('div', { class: 'rs-two' }, left, scriptPane(R.view));
     }
@@ -1099,8 +1099,8 @@
       disabled: R.switching || (which === 'sync' && s && !s.central) ? '' : null, onclick: () => pickSource(which),
     }, label);
     return h('span', { class: 'seg src-switch', role: 'group', 'aria-label': 'Database', title: s ? `Reading: ${s.label}` : '' },
-      b('local', 'Local', 'the MLflow tracking URI of the Settings'),
-      b('sync', 'Synchronised', s?.central ? `the synchronised database on ${s.central} (connect it in Servers first)` : 'no central server in the settings'));
+      b('local', 'Local', 'The MLflow tracking URI of the Settings'),
+      b('sync', 'Synchronised', s?.central ? `The synchronised database on ${s.central} (connect it in Servers first)` : 'No central server in the settings'));
   }
 
   async function pickSource(which) {
@@ -1128,7 +1128,7 @@
   /* the switch failed: say why (and nothing from the database still chosen, which may not answer either) */
   function switchFailed() {
     $('#mlflowtab').replaceChildren(h('div', { class: 'mlflow-bar' }, h('span', { class: 'sp' }), sourceSwitch()), switchNote(),
-      h('button', { type: 'button', class: 'ghost', onclick: () => { R.switchError = ''; startMlflow(); } }, `Open MLflow on the ${R.source?.label || 'database'} instead`));
+      h('button', { type: 'button', class: 'ghost', onclick: () => { R.switchError = ''; startMlflow(); } }, `Open MLflow on the ${R.source?.label || 'database'} Instead`));
   }
   function switchNote() {
     return h('p', { class: 'dlg-err' }, R.switchError, ' ',
@@ -1164,7 +1164,7 @@
     } catch (e) {
       if (gen !== mlflowGen) return;
       box.replaceChildren(h('div', { class: 'mlflow-bar' }, h('span', { class: 'sp' }), sourceSwitch()),
-        h('pre', { class: 'dlg-err' }, e.message), h('button', { type: 'button', class: 'ghost', onclick: startMlflow }, 'Try again'));
+        h('pre', { class: 'dlg-err' }, e.message), h('button', { type: 'button', class: 'ghost', onclick: startMlflow }, 'Try Again'));
     }
   }
 
@@ -1184,7 +1184,7 @@
         h('span', { class: 'hint' }, `MLflow server started by the launcher (${R.source?.label || cfg.project.tracking_uri.split('?')[0]}${mlflowImage ? `, in ${mlflowImage}` : ''})`),
         h('span', { class: 'sp' }), sourceSwitch(),
         h('button', { type: 'button', class: 'tiny', onclick: () => { frame.src = base + '#/experiments'; } }, 'Experiments'),
-        h('a', { class: 'tiny', href: base, target: '_blank', rel: 'noopener' }, 'Open in a new tab')), frame);
+        h('a', { class: 'tiny', href: base, target: '_blank', rel: 'noopener' }, 'Open in a New Tab')), frame);
     } else if (url !== base) frame.src = url;
   }
 

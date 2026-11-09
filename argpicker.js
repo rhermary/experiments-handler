@@ -68,7 +68,7 @@
       schedulePreview();
       return;
     }
-    if (target === 'session' && v) { st.values[name] = value; draw(); return; }
+    if (target === 'session' && v) { st.values[name] = value; draw(); scheduleSaveValues(); return; }
     if (target.startsWith('block:')) {
       const bid = target.slice(6), rowName = st.blocks[bid];
       await commit((c) => {
@@ -150,15 +150,15 @@
   function valueLine(f) {
     const bits = [];
     const tag = (text, cls = '') => h('span', { class: 'pk-tag ' + cls }, text);
-    if (f.linked) bits.push(tag(`set through ${f.linked}`, 'link'));
+    if (f.linked) bits.push(tag(`Set through ${f.linked}`, 'link'));
     else if (f.var) {
-      const src = isDraft(f.var) ? 'this option' : f.var.source === 'default' ? 'variable default' : f.var.source === 'edited' ? 'session edit' : f.var.source;
-      bits.push(h('code', {}, f.value ?? ''), tag(`set by ${src}`, 'set'));
+      const src = isDraft(f.var) ? 'this option' : f.var.source === 'default' ? 'variable default' : f.var.source === 'edited' ? 'edited value' : f.var.source;
+      bits.push(h('code', {}, f.value ?? ''), tag(`Set by ${src}`, 'set'));
     } else if (f.within) {
-      bits.push(h('code', {}, f.value ?? ''), tag(`inside ${short(f.within.name)} (${isDraft(f.within) ? 'this option' : f.within.source})`, 'set'));
-    } else if (f.has_value) bits.push(h('code', {}, f.value ?? ''), tag('config file'));
-    else bits.push(h('span', { class: 'pk-def' }, f.required ? 'required, no default' : 'default'), f.required ? '' : h('code', {}, f.default || '""'));
-    if (f.class_var) bits.push(tag(`class set by ${isDraft(f.class_var) ? 'this option' : f.class_var.source === 'default' ? 'variable default' : f.class_var.source}`, 'set'));
+      bits.push(h('code', {}, f.value ?? ''), tag(`Inside ${short(f.within.name)} (${isDraft(f.within) ? 'this option' : f.within.source})`, 'set'));
+    } else if (f.has_value) bits.push(h('code', {}, f.value ?? ''), tag('Config file'));
+    else bits.push(h('span', { class: 'pk-def' }, f.required ? 'Required, no default' : 'Default'), f.required ? '' : h('code', {}, f.default || '""'));
+    if (f.class_var) bits.push(tag(`Class set by ${isDraft(f.class_var) ? 'this option' : f.class_var.source === 'default' ? 'variable default' : f.class_var.source}`, 'set'));
     if (f.below) bits.push(tag(`${f.below} set inside`, 'set'));
     return h('div', { class: 'pk-value' }, ...bits);
   }
@@ -197,7 +197,7 @@
     items.push(option('__other__', 'Other class...'));
     const other = h('input', { type: 'text', class: 'mono', placeholder: 'package.module.Class', hidden: '', spellcheck: 'false' });
     other.hidden = true;
-    const sel = h('select', {}, option('', f.cls ? short(f.cls) : f.cls === '' ? '(class from the type)' : 'not set - pick a class'), ...items);
+    const sel = h('select', {}, option('', f.cls ? short(f.cls) : f.cls === '' ? '(class from the type)' : 'Not set - pick a class'), ...items);
     sel.disabled = locked;
     sel.addEventListener('change', () => { if (sel.value === '__other__') { other.hidden = false; other.focus(); } else if (sel.value) run(async () => { await onPick(sel.value); await refresh(); }); });
     other.addEventListener('keydown', (e) => {
@@ -208,11 +208,11 @@
 
   function controls(f, locked) {
     const box = h('div', { class: 'pk-ctl' });
-    if (f.linked) { box.append(h('span', { class: 'pk-def' }, 'linked: set the source instead')); return box; }
+    if (f.linked) { box.append(h('span', { class: 'pk-def' }, 'Linked: set the source instead')); return box; }
     const choose = (v) => run(async () => { await setVar(f.env, v, f.var); await refresh(); });
     if (f.kind === 'class') box.append(...classControl(f, locked, (v) => chooseClass([...P.path, f.name], v, f.class_var || f.var)));
     else if (f.kind === 'classpath') box.append(...classControl(f, locked, (v) => setVar(f.env, v, f.var)));
-    else if (f.kind === 'group') box.append(h('span', { class: 'pk-def' }, 'group of arguments'));
+    else if (f.kind === 'group') box.append(h('span', { class: 'pk-def' }, 'Group of arguments'));
     else if (f.choices && !f.flag) {
       box.append(selectControl(f.choices.map((c) => option(c, c)), (v) => setVar(f.env, v, f.var), f.edit, locked, 'choose...'));
     } else {
@@ -231,7 +231,7 @@
         const item = `{class_path: ${fqn}}`;
         input.value = cur && cur !== 'NULL' && cur.endsWith(']') ? `${cur.slice(0, -1)}${cur === '[]' ? '' : ', '}${item}]` : `[${item}]`;
         input.focus();
-      }, '', locked, 'append a class...', false));
+      }, '', locked, 'Append a class...', false));
     }
     if (f.open) box.append(btn('Open >', () => go([...P.path, f.name]), { title: 'See its arguments' }));
     if (f.var && (!P.draft || isDraft(f.var))) box.append(btn('Unset', () => run(async () => { await unsetVar(f.var); await refresh(); }), { title: `Remove ${f.var.name}` }));
@@ -259,7 +259,7 @@
       'data-name': f.name, title: missing ? 'Required: no default and no value yet' : '' },
       h('div', { class: 'pk-main' },
         h('div', { class: 'pk-name' }, h('b', {}, f.name), f.type ? h('span', { class: 'pk-type' }, f.type) : '',
-          f.origin && f.origin !== short(P.data.node.cls) ? h('span', { class: 'pk-origin', title: 'declared in this base class' }, f.origin) : ''),
+          f.origin && f.origin !== short(P.data.node.cls) ? h('span', { class: 'pk-origin', title: 'Declared in this base class' }, f.origin) : ''),
         f.doc ? h('div', { class: 'pk-doc', title: f.doc }, f.doc) : '',
         valueLine(f),
         ...checkLines([f.var?.name, f.class_var?.name].filter(Boolean))),
@@ -287,8 +287,8 @@
   }
 
   function customRow(node, locked) {
-    const name = h('input', { type: 'text', class: 'mono', placeholder: 'argument name', spellcheck: 'false' });
-    const val = h('input', { type: 'text', class: 'mono', placeholder: 'value', spellcheck: 'false' });
+    const name = h('input', { type: 'text', class: 'mono', placeholder: 'Argument name', spellcheck: 'false' });
+    const val = h('input', { type: 'text', class: 'mono', placeholder: 'Value', spellcheck: 'false' });
     const add = () => {
       const n = name.value.trim(), v = val.value.trim();
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(n) || !v) { note('Give a name (letters, digits, _) and a value.', true); return; }
@@ -298,7 +298,7 @@
     const set = btn('Add', add, { class: 'tiny primary' });
     name.disabled = val.disabled = set.disabled = locked;
     return h('div', { class: 'pk-row custom' },
-      h('div', { class: 'pk-main' }, h('div', { class: 'pk-name' }, h('b', {}, 'Other argument'), h('span', { class: 'pk-type' }, 'not in the list')),
+      h('div', { class: 'pk-main' }, h('div', { class: 'pk-name' }, h('b', {}, 'Other argument'), h('span', { class: 'pk-type' }, 'Not in the list')),
         h('div', { class: 'pk-doc' }, 'For arguments the source analysis cannot see (library classes, **kwargs passed on).')),
       h('div', { class: 'pk-ctl' }, name, val, set));
   }
@@ -326,16 +326,16 @@
     if (node.mode === 'class') {
       const f = { env: node.env, var: node.var, class_var: node.class_var, has_value: node.exists, value: node.exists ? 'x' : 'NULL',
         classes: node.classes, cls: node.cls, nullable: false };
-      nodeBox.append(h('div', { class: 'pk-nodehead' }, h('b', {}, node.cls_name || 'no class yet'), ...classControl(f, false, (v) => chooseClass(P.path, v, node.class_var || node.var))));
+      nodeBox.append(h('div', { class: 'pk-nodehead' }, h('b', {}, node.cls_name || 'No class yet'), ...classControl(f, false, (v) => chooseClass(P.path, v, node.class_var || node.var))));
     } else if (node.mode === 'group') nodeBox.append(h('div', { class: 'pk-nodehead' }, h('b', {}, node.cls_name)));
     if (node.doc) nodeBox.append(h('div', { class: 'pk-doc' }, node.doc));
-    nodeBox.append(h('div', { class: 'pk-env' }, node.mode === 'root' ? 'top level of the program config' : node.env));
+    nodeBox.append(h('div', { class: 'pk-env' }, node.mode === 'root' ? 'Top level of the program config' : node.env));
     if (locked) nodeBox.append(h('p', { class: 'pk-warn' }, 'This argument is not in the config (null or absent). Pick a class: it is created as a whole object. '
       + 'Arguments inside an absent object would be ignored by the program, so they stay locked until then.'));
     for (const w of node.warnings) nodeBox.append(h('p', { class: 'pk-warn' }, w));
     kids.push(nodeBox);
 
-    const filter = h('input', { type: 'text', id: 'pk-filter', placeholder: 'filter arguments', value: P.filter, spellcheck: 'false' });
+    const filter = h('input', { type: 'text', id: 'pk-filter', placeholder: 'Filter arguments', value: P.filter, spellcheck: 'false' });
     filter.addEventListener('input', () => { P.filter = filter.value; paintList(); });
     if (P.draft) {
       kids.push(draftPanel(), h('div', { class: 'pk-bar' }, filter));
