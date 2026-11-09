@@ -7,6 +7,7 @@ the app writes <root>/scripts/<XP>/<timestamp>.sh and can run it.
 The project root (where the scripts run) is set in the page (Settings) or in experiments.yaml.
 """
 import argparse
+import json
 import re
 import signal
 import sys
@@ -15,7 +16,7 @@ import subprocess
 import threading
 
 import yaml
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
 import checker
 import core
@@ -363,6 +364,30 @@ def api_report_curves():
     body = request.get_json(force=True)
     return _report_errors(lambda: jsonify(results.curves_preview(core.load(), body["sel"], str(body.get("view") or ""),
                                                                  bool(body.get("fresh")))))
+
+
+@app.post("/api/report/artifacts")
+def api_report_artifacts():
+    """The artifact files of the selection's runs (artifact views): body {sel, fresh}."""
+    body = request.get_json(force=True)
+    return _report_errors(lambda: jsonify(results.artifact_paths(core.load(), body["sel"], bool(body.get("fresh")))))
+
+
+@app.get("/api/report/artifact")
+def api_report_artifact():
+    """A run's artifact file: ?sel=<the selection, JSON>&run=<run id>&path=<artifact path>[&as=png: a PDF's first
+    page]. Only for the runs of the selection."""
+    try:
+        sel = json.loads(request.args.get("sel") or "{}")
+        local, kind = results.artifact_file(core.load(), sel, str(request.args.get("run") or ""),
+                                            str(request.args.get("path") or ""), request.args.get("as") == "png")
+    except (ValueError, OSError, KeyError) as err:
+        return Response(str(err), status=400, mimetype="text/plain")
+    except Exception as err:  # pylint: disable=broad-except  # MLflow: the run or its files not reachable
+        return Response(f"{type(err).__name__}: {err}", status=400, mimetype="text/plain")
+    resp = send_file(local, mimetype=kind, conditional=True, max_age=3600)
+    resp.headers["Content-Disposition"] = f"inline; filename=\"{local.name}\""
+    return resp
 
 
 @app.post("/api/latex")

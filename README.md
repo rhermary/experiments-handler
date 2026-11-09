@@ -17,8 +17,10 @@ A small web app to build, launch and analyse the experiments of a Python researc
   command loop. Every view has its own address (bookmark it, open it in another tab).
 - **Results**: the MLflow runs of an XP, labelled by *dimensions* (from the blocks, or MLflow filters), shown as a table,
   dot plots and a list of runs, with a report script (LaTeX table, PDF figures) that queries MLflow itself. Several
-  *selections* per XP (filter, values kept, rows and columns), each with its own *views* (training curves...) and a text
-  explaining each view. Runs that use another run (e.g. a checkpoint) are linked to it, and what differs between those
+  *selections* per XP (filter, values kept, rows and columns), each with its own *views* and a text explaining each
+  view: *training curves* (metric histories averaged per group), or an *artifact* view, one file the runs logged
+  (chosen among their artifacts) shown for each run side by side, one row per value of a dimension: a PDF as its first
+  page (Ghostscript; click for the whole file), an image, or a text file. Runs that use another run (e.g. a checkpoint) are linked to it, and what differs between those
   runs becomes dimensions. The Runs view shows the runs the filter leaves out (and why), and the block options that no
   run matches.
 - **Run on** (next to Launch): this machine, or one of your servers (connected in Servers). On a server, the launch is

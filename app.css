@@ -929,3 +929,17 @@ body.tab-sync main > section:not(#synctab), body.tab-sync main > #output, body.t
 .sync-last .sync-out { flex-basis: 100%; }
 header #reload { padding: 5px 12px; font-size: 13px; border-radius: 8px; }
 
+/* artifact views (results.js): one file of each run, side by side */
+.rs-art { display: grid; gap: 14px; }
+.rs-art-group h4 { margin: 4px 0 8px; font-size: 14px; }
+.rs-art-group h4 small { color: var(--mute); font-weight: 500; }
+.rs-art-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+.rs-art.s .rs-art-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.rs-art.l .rs-art-grid { grid-template-columns: repeat(auto-fill, minmax(min(560px, 100%), 1fr)); }
+.rs-art-card { margin: 0; display: grid; gap: 6px; align-content: start; min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.rs-art-card.missing { opacity: .55; }
+.rs-art-card figcaption { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; font-size: 12px; }
+.rs-art-lab { padding: 0 6px; border-radius: 4px; background: var(--sel); }
+.rs-art-img { display: block; background: #fff; border-radius: 4px; }
+.rs-art-img img { display: block; width: 100%; height: auto; }
+.rs-art-text { margin: 0; max-height: 360px; overflow: auto; font-size: 11px; white-space: pre; }

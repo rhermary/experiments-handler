@@ -636,3 +636,100 @@ def run_script(text, what, timeout=300):
         _OUTPUTS.clear()
     _OUTPUTS[key] = res
     return res
+
+
+# --------------------------------------------------------------------------- artifact views
+
+ART_RUNS = 300                                  # runs whose artifacts are listed (the first ones of the selection)
+ART_DEPTH = 6                                   # folder levels listed under a run's artifacts
+TEXT_MAX = 64 * 1024                            # bytes of a text artifact shown in the page
+_ART_LISTS = {}                                 # (tracking URI, run id) -> [(path, size)]: artifacts do not change
+
+
+def _client(conf):
+    import mlflow                                           # pylint: disable=import-outside-toplevel
+    os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
+    return mlflow.tracking.MlflowClient(conf["tracking_uri"])
+
+
+def _artifact_list(client, uri, run_id):
+    key = (uri, run_id)
+    if key not in _ART_LISTS:
+        out = []
+
+        def walk(path, depth):
+            for f in client.list_artifacts(run_id, path):
+                if f.is_dir:
+                    if depth < ART_DEPTH:
+                        walk(f.path, depth + 1)
+                else:
+                    out.append((f.path, f.file_size or 0))
+        walk(None, 0)
+        _ART_LISTS[key] = out
+    return _ART_LISTS[key]
+
+
+def artifact_paths(cfg, sel, fresh=False):
+    """The artifact files of the selection's runs: [{path, runs (how many have it), size (largest), run_ids}], most
+    common first; their files are not read."""
+    conf = report_config(cfg, sel, None, fresh)
+    df = _runs_df(conf)
+    ids = list(df["run_id"]) if len(df) else []
+    client, found, errors = _client(conf), {}, 0
+    if fresh:
+        for rid in ids:
+            _ART_LISTS.pop((conf["tracking_uri"], rid), None)
+    for rid in ids[:ART_RUNS]:
+        try:
+            files = _artifact_list(client, conf["tracking_uri"], rid)
+        except Exception:                                   # pylint: disable=broad-except  # files not reachable here
+            errors += 1
+            continue
+        for path, size in files:
+            n, big, which = found.get(path, (0, 0, []))
+            found[path] = (n + 1, max(big, size), which + [rid])
+    paths = [{"path": p, "runs": n, "size": s, "run_ids": w}
+             for p, (n, s, w) in sorted(found.items(), key=lambda x: (-x[1][0], x[0]))]
+    return {"paths": paths, "runs": min(len(ids), ART_RUNS), "total_runs": len(ids), "unreadable": errors}
+
+
+def _safe_artifact_path(path):
+    p = (path or "").replace("\\", "/").strip("/")
+    if not p or any(part in ("", ".", "..") for part in p.split("/")):
+        raise ValueError(f"not an artifact path: '{path}'")
+    return p
+
+
+def artifact_file(cfg, sel, run_id, path, as_png=False):
+    """(local file, mimetype) of the artifact `path` of the run `run_id`, which must be a run of the selection; a PDF
+    as a PNG of its first page when as_png (Ghostscript). Files are cached next to the settings."""
+    import hashlib                                          # pylint: disable=import-outside-toplevel
+    import mimetypes                                        # pylint: disable=import-outside-toplevel
+    path = _safe_artifact_path(path)
+    conf = report_config(cfg, sel)
+    df = _runs_df(conf)
+    if not len(df) or run_id not in set(df["run_id"]):
+        raise ValueError(f"run {run_id} is not a run of this selection")
+    folder = core.state_path(".artifact-cache") / re.sub(r"[^\w]", "", run_id) / hashlib.sha1(path.encode()).hexdigest()[:16]
+    local = folder / os.path.basename(path)
+    if not local.exists():
+        folder.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=folder) as tmp:
+            got = _client(conf).download_artifacts(run_id, path, tmp)
+            if os.path.isdir(got):
+                raise ValueError(f"{path} is a folder")
+            os.replace(got, local)
+    if as_png and local.suffix.lower() == ".pdf":
+        png = local.with_suffix(".page1.png")
+        if not png.exists():
+            r = subprocess.run(["gs", "-q", "-dSAFER", "-dBATCH", "-dNOPAUSE", "-sDEVICE=png16m", "-r110",
+                                "-dFirstPage=1", "-dLastPage=1", "-dTextAlphaBits=4", "-dGraphicsAlphaBits=4",
+                                f"-sOutputFile={png}", str(local)], capture_output=True, text=True, timeout=60, check=False)
+            if r.returncode != 0 or not png.exists():
+                raise ValueError(f"cannot render {path}: {(r.stderr or r.stdout).strip()[-300:] or 'gs failed'}"
+                                 + ("" if shutil.which("gs") else " (Ghostscript, gs, is not installed)"))
+        return png, "image/png"
+    kind = mimetypes.guess_type(local.name)[0] or "application/octet-stream"
+    if local.suffix.lower() in (".yaml", ".yml", ".json", ".csv", ".txt", ".log", ".md", ".py", ".tex", ".tsv"):
+        kind = "text/plain"                                  # Flask adds the charset
+    return local, kind

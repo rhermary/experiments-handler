@@ -253,7 +253,7 @@
     const C = conf(), key = R.view;
     const view = curView();
     const custom = C.readme?.[key];
-    const text = custom || (view ? curvesReadme(view) : README[key]) || '';
+    const text = custom || (view ? (view.type === 'artifact' ? artifactReadme(view) : curvesReadme(view)) : README[key]) || '';
     const edit = () => openDialog({
       title: `What this view shows (${view ? view.title : key})`,
       wide: true,
@@ -283,10 +283,11 @@
       title: 'Add a view',
       fields: [
         { key: 'title', label: 'Title', value: 'Training curves' },
-        { key: 'type', type: 'select', label: 'Kind', value: 'curves', options: [{ value: 'curves', label: 'Training curves: metric histories, averaged per group' }] },
+        { key: 'type', type: 'select', label: 'Kind', value: 'curves', options: [{ value: 'curves', label: 'Training curves: metric histories, averaged per group' },
+          { value: 'artifact', label: 'An artifact of each run (a PDF plot, an image, a config...), side by side' }] },
         { key: 'source', type: 'select', label: 'Runs', value: source,
           options: [{ value: '', label: `the runs of ${C.experiment}` }, ...links.map((l) => ({ value: l.name, label: `the runs linked by ${l.name} (${l.param})` }))] },
-        { type: 'note', label: 'The metrics, groups (color, panels) and smoothing are set in the view. Each view has its own text explaining it, shown above it.' },
+        { type: 'note', label: 'Training curves: the metrics, groups (color, panels) and smoothing are set in the view. Artifact: the file is chosen in the view, among the artifacts of the runs (Runs: the runs of the selection). Each view has its own text explaining it, shown above it.' },
       ],
       submitLabel: 'Add',
       onSubmit: async (v) => {
@@ -294,8 +295,15 @@
         let id = slug(v.title || 'view'), i = 2;
         while (C.views.some((x) => x.id === id)) id = `${slug(v.title || 'view')}_${i++}`;
         const multi = C.dimensions.filter((d) => (R.data.order[d.name] || []).length > 1).map((d) => d.name);
-        await saveResults({ views: [...C.views, { id, type: v.type, title: v.title || id, metrics: firstTrain ? [firstTrain] : [], x: 'step', source: v.source,
-          color: multi[0] || '', panel: '', smooth: 0.6, std: true, logy: false }] });
+        const title = v.title && !(v.type === 'artifact' && v.title === 'Training curves') ? v.title : (v.type === 'artifact' ? 'Artifact' : id);
+        if (v.type === 'artifact') {
+          id = slug(title); i = 2;
+          while (C.views.some((x) => x.id === id)) id = `${slug(title)}_${i++}`;
+          await saveResults({ views: [...C.views, { id, type: 'artifact', title, path: '', group: multi[0] || '', size: 'm' }] });
+        } else {
+          await saveResults({ views: [...C.views, { id, type: v.type, title: v.title || id, metrics: firstTrain ? [firstTrain] : [], x: 'step', source: v.source,
+            color: multi[0] || '', panel: '', smooth: 0.6, std: true, logy: false }] });
+        }
         setView('v:' + id);
       },
     });
@@ -341,6 +349,122 @@
         sel(v.logy, [[false, 'linear y'], [true, 'log y']], (x) => saveView({ logy: x === 'true' })),
         h('button', { type: 'button', class: 'tiny danger', onclick: del }, 'Delete view')),
       h('div', { class: 'rs-line' }, h('span', { class: 'rs-key' }, 'Metrics'), ...metrics, h('button', { type: 'button', class: 'tiny', onclick: add }, '+ metric')));
+  }
+
+  /* ---------- artifact views: one file of each run (a PDF plot, an image, a text), side by side ---------- */
+
+  const ART = { lists: {}, texts: {} };            // selection key -> the artifacts of its runs; text artifacts read
+  const selKey = () => JSON.stringify(selq());
+  const artUrl = (run, path, png) => `/api/report/artifact?sel=${encodeURIComponent(JSON.stringify(selq()))}&run=${encodeURIComponent(run)}`
+    + `&path=${encodeURIComponent(path)}${png ? '&as=png' : ''}`;
+  const extOf = (p) => (p.match(/\.([A-Za-z0-9]+)$/) || [, ''])[1].toLowerCase();
+  const IMG = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'];
+  const TEXT = ['yaml', 'yml', 'json', 'csv', 'tsv', 'txt', 'log', 'md', 'py', 'tex'];
+  const fmtSize = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
+
+  function artifactList(fresh = false) {
+    const key = selKey();
+    if (!ART.lists[key] || fresh) {
+      ART.lists[key] = { pending: true };
+      api('/api/report/artifacts', { sel: selq(), fresh }).then((r) => { ART.lists[key] = r; }).catch((e) => { ART.lists[key] = { error: e.message }; })
+        .finally(() => { if (selKey() === key) paint(); });
+    }
+    return ART.lists[key];
+  }
+
+  function artifactReadme(v) {
+    return v.path ? `The artifact ${v.path} of each run, ${v.group ? `one row per ${v.group}, ` : ''}labelled by the other dimensions. A PDF shows its first page: click it for the whole file.`
+      : 'Choose the artifact to show (File), among the files the runs of this selection logged.';
+  }
+
+  function artifactControls(v) {
+    const list = artifactList();
+    const title = h('input', { type: 'text', value: v.title, class: 'rs-title-in' });
+    title.addEventListener('change', () => saveView({ title: title.value.trim() || v.id }));
+    const size = h('select', {}, ...[['s', 'small'], ['m', 'medium'], ['l', 'large']].map(([x, t]) => h('option', { value: x }, t)));
+    size.value = v.size || 'm';
+    size.addEventListener('change', () => saveView({ size: size.value }));
+    const pick = () => openChooser({
+      title: 'Artifact to show for each run',
+      current: v.path,
+      load: async () => {
+        const r = await api('/api/report/artifacts', { sel: selq() });
+        ART.lists[selKey()] = r;
+        return { note: `the files of ${r.runs} run(s)` + (r.total_runs > r.runs ? ` (the first ${r.runs} of ${r.total_runs})` : '')
+            + (r.unreadable ? `; ${r.unreadable} run(s) whose files are not reachable from here` : '') + '. The number: how many runs have it.',
+          items: r.paths.map((x) => ({ value: x.path, label: x.path, sub: `${x.runs} run(s) · up to ${fmtSize(x.size)}`, group: x.path.includes('/') ? x.path.split('/').slice(0, -1).join('/') : '(top)', tags: [extOf(x.path) || 'file'] })) };
+      },
+      onPick: (path) => saveView({ path }),
+    });
+    const del = () => commit((c) => {
+      const s = selectionIn(c.xps.find((y) => y.name === st.xp));
+      s.views = (s.views || []).filter((w) => w.id !== v.id);
+    }, { deleted: `view "${v.title}"` }).then(() => { R.view = 'table'; load(false); }).catch((e) => status(e.message, true));
+    const found = list.paths?.find((x) => x.path === v.path);
+    return h('div', { class: 'rs-controls' },
+      h('div', { class: 'rs-line' },
+        h('label', {}, 'Title', title),
+        h('span', { class: 'rs-key' }, 'File'), v.path ? h('code', {}, v.path) : h('span', { class: 'hint' }, 'none yet'),
+        h('button', { type: 'button', class: 'tiny' + (v.path ? '' : ' primary'), onclick: pick }, v.path ? 'Change' : 'Choose a file'),
+        found ? h('span', { class: 'hint' }, `${found.runs} of ${list.runs} run(s) have it`) : '',
+        h('label', {}, 'Rows', dimSelect(v.group, (x) => saveView({ group: x }))),
+        h('label', {}, 'Size', size),
+        h('span', { class: 'sp' }),
+        h('button', { type: 'button', class: 'tiny', title: 'List the files of the runs again (new artifacts)', onclick: () => { ART.texts = {}; artifactList(true); paint(); } }, 'Reload files'),
+        h('button', { type: 'button', class: 'tiny danger', onclick: del }, 'Delete view')));
+  }
+
+  function artifactCell(v, r) {
+    const ext = extOf(v.path);
+    const open = artUrl(r.id, v.path, false);
+    if (ext === 'pdf' || IMG.includes(ext)) {
+      const img = h('img', { src: artUrl(r.id, v.path, ext === 'pdf'), alt: `${v.path} of ${r.name || r.id}`, loading: 'lazy' });
+      const box = h('a', { href: open, target: '_blank', rel: 'noopener', class: 'rs-art-img', title: 'Open the whole file' }, img);
+      img.addEventListener('error', () => fetch(img.src).then((x) => x.text()).then((t) => box.replaceWith(h('p', { class: 'dlg-err' }, t.slice(0, 300)))).catch(() => {}));
+      return box;
+    }
+    if (TEXT.includes(ext)) {
+      const key = r.id + '\u0000' + v.path;
+      const pre = h('pre', { class: 'rs-art-text' }, ART.texts[key] ?? 'reading...');
+      if (ART.texts[key] === undefined) {
+        fetch(open).then(async (x) => { const t = await x.text(); return x.ok ? t : Promise.reject(new Error(t)); })
+          .then((t) => { ART.texts[key] = t.length > 20000 ? t.slice(0, 20000) + '\n[...]' : t; pre.textContent = ART.texts[key]; })
+          .catch((e) => { pre.textContent = e.message; pre.classList.add('dlg-err'); });
+      }
+      return pre;
+    }
+    return h('a', { href: open, target: '_blank', rel: 'noopener', class: 'tiny btnlink' }, `Open ${v.path.split('/').pop()}`);
+  }
+
+  function artifactGrid(v) {
+    if (!v.path) return h('p', { class: 'empty' }, 'Choose the file to show for each run: File > Choose a file.');
+    const list = artifactList();
+    if (list.pending) return h('p', { class: 'empty' }, 'Listing the files of the runs...');
+    if (list.error) return h('pre', { class: 'dlg-err' }, list.error);
+    const have = new Set(list.paths.find((x) => x.path === v.path)?.run_ids || []);
+    const dims = conf().dimensions, D = R.data;
+    const others = dims.filter((d) => d.name !== v.group);
+    const rank = (d, x) => { const i = (D.order[d.name] || []).indexOf(x); return i < 0 ? 1e9 : i; };
+    const runs = [...D.runs].sort((a, b) => {
+      for (const d of [...dims.filter((x) => x.name === v.group), ...others]) { const x = rank(d, a.labels[d.name]) - rank(d, b.labels[d.name]); if (x) return x; }
+      return 0;
+    });
+    const groups = new Map();
+    for (const r of runs) {
+      const g = v.group ? r.labels[v.group] ?? '' : '';
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(r);
+    }
+    const missing = runs.filter((r) => !have.has(r.id)).length;
+    const card = (r) => h('figure', { class: 'rs-art-card' + (have.has(r.id) ? '' : ' missing') },
+      h('figcaption', {}, ...others.map((d) => h('span', { class: 'rs-art-lab', title: d.name }, String(r.labels[d.name] ?? ''))),
+        h('a', { class: 'hint', href: window.XPRouter?.href({ tab: 'mlflow', mlflow: `/experiments/${D.experiment_id}/runs/${r.id}` }) || '#', title: 'Open the run in the MLflow tab' }, r.name || r.id.slice(0, 8))),
+      have.has(r.id) ? artifactCell(v, r) : h('p', { class: 'hint' }, `no ${v.path.split('/').pop()} in this run`));
+    return h('div', { class: 'rs-art ' + (v.size || 'm') },
+      missing ? h('p', { class: 'hint' }, `${runs.length - missing} of ${runs.length} run(s) have ${v.path}` + (list.total_runs > list.runs ? ` (files listed for the first ${list.runs} runs)` : '') + '.') : '',
+      ...[...groups.entries()].map(([g, rs]) => h('section', { class: 'rs-art-group' },
+        v.group ? h('h4', {}, h('small', {}, v.group + ' '), String(g)) : '',
+        h('div', { class: 'rs-art-grid' }, ...rs.map(card)))));
   }
 
   /* the curves of the preview, drawn here from the data the script also computes */
@@ -935,7 +1059,8 @@
     let body;
     if (R.view.startsWith('v:') && !curView()) R.view = 'table';           // a view deleted meanwhile
     const view = curView();
-    if (view) {
+    if (view?.type === 'artifact') body = h('div', {}, artifactControls(view), artifactGrid(view));
+    else if (view) {
       const left = h('div', { class: 'rs-side' }, h('div', { class: 'rs-side-head' }, h('h3', {}, 'Preview'), h('span', { class: 'hint' }, 'computed by the launcher')),
         curvesPreview(view));
       body = h('div', {}, curvesControls(view), h('div', { class: 'rs-two' }, left, scriptPane('view:' + view.id)));

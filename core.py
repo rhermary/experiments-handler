@@ -380,15 +380,23 @@ def _selections(raw, xp):
 
 
 def _views(raw, xp):
-    """Results views (more figures): [{id, type: curves, title, metrics, x, source, color, panel, smooth, std, logy}]."""
+    """Results views (more figures): [{id, type: curves, title, metrics, x, source, color, panel, smooth, std, logy}]
+    or [{id, type: artifact, title, path (an artifact file of the runs), group (a dimension: one row per value),
+    size: s | m | l}]."""
     out, ids = [], set()
     for v in raw or []:
         vid = slug(_text(v.get("id")) or _text(v.get("title")) or "view")
         if vid in ids:
             raise ValueError(f"XP '{xp}', results views: id '{vid}' is used twice")
         ids.add(vid)
+        if _text(v.get("type")) == "artifact":
+            size = _text(v.get("size")).strip()
+            out.append({"id": vid, "type": "artifact", "title": _text(v.get("title")).strip() or vid,
+                        "path": _text(v.get("path")).strip().strip("/"), "group": _text(v.get("group")).strip(),
+                        "size": size if size in ("s", "m", "l") else "m"})
+            continue
         if _text(v.get("type")) != "curves":
-            raise ValueError(f"XP '{xp}', results view '{vid}': unknown type '{v.get('type')}' (curves)")
+            raise ValueError(f"XP '{xp}', results view '{vid}': unknown type '{v.get('type')}' (curves, artifact)")
         try:
             smooth = min(0.99, max(0.0, float(v.get("smooth") or 0)))
         except (TypeError, ValueError):

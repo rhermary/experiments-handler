@@ -98,6 +98,7 @@ experiments.yaml.*
 actions/
 actions.log
 .launcher/
+.artifact-cache/
 # passwd-format list of the servers' users (names GPU process owners): not for git
 userlist.csv
 EOF
