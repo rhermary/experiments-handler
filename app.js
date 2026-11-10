@@ -363,6 +363,9 @@ function addBlock() {
     const others = x.blocks.filter((b) => b.kind !== 'fixed');
     if (x.name !== st.xp && others.length > 1) sources.push({ value: `${xi}:*`, label: `${x.name}: all ${others.length} blocks (not its fixed one)` });
     others.forEach((b) => sources.push({ value: `${xi}:${b.id}`, label: `${x.name} / ${b.label}  (${b.rows.length} option${b.rows.length === 1 ? '' : 's'})` }));
+    const fx = x.blocks.find((b) => b.kind === 'fixed');           // its All Runs, as a block of options here
+    const n = Object.keys(fx?.rows[0]?.vars || {}).length;
+    if (fx && x.name !== st.xp) sources.push({ value: `${xi}:${fx.id}`, label: `${x.name} / ${fx.label}: as a block "${fx.label} (${x.name})" (${n} variable${n === 1 ? '' : 's'})` });
   });
   const fields = [];
   if (sources.length) {
@@ -392,8 +395,14 @@ function addBlock() {
         }
         const [xi, bid] = [Number(v.source.split(':')[0]), v.source.slice(v.source.indexOf(':') + 1)];
         const from = c.xps[xi].blocks;
-        for (const b of (bid === '*' ? from : from.filter((x) => x.id === bid)).filter((x) => x.kind !== 'fixed')) {   // the XP has its own fixed block
+        // the XP has its own fixed block: another XP's one is copied (when chosen alone) as a block with one option
+        for (const b of (bid === '*' ? from.filter((x) => x.kind !== 'fixed') : from.filter((x) => x.id === bid))) {
           const copy = clone(b);
+          if (copy.kind === 'fixed') {
+            delete copy.kind;
+            copy.label = `${b.label} (${c.xps[xi].name})`;
+            copy.rows[0].name = c.xps[xi].name;
+          }
           if (bid !== '*' && v.label.trim()) copy.label = v.label.trim();
           copy.id = uniqueId(xp.blocks, copy.label);
           xp.blocks.push(copy);
