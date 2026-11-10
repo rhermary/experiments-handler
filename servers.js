@@ -405,12 +405,45 @@
 
   const gb = (b) => (b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : b >= 1e3 ? `${Math.round(b / 1e3)} kB` : `${b} B`);
 
+  /* why a server cannot be previewed / synced now ('' when it can); strict: its databases must be known to run */
+  function syncReady(sv, central, strict = false) {
+    const own = sv.db?.own, cdb = central?.db?.sync;
+    return !sv.connected ? 'Connect it first' : !central?.connected ? `Connect ${central?.name} first`
+      : (own ? own.state !== 'running' : strict) ? 'Its database is not running (Databases)'
+      : (cdb ? cdb.state !== 'running' : strict) ? `The synchronised database on ${central.name} is not running (Databases)` : '';
+  }
+
+  /* Sync tab: read every database again, then preview again every server that is ready (one after the other: each
+     preview opens the tunnel to the synchronised database through the same local socket) */
+  function readAllSyncButton(central) {
+    const busy = S.busy['*syncread'];
+    return h('button', { type: 'button', class: 'sv-btn', disabled: busy ? '' : null,
+      title: 'Read the databases of the connected servers, then preview again (read-only) the servers whose database and the synchronised one run',
+      onclick: async () => {
+        S.busy['*syncread'] = true; paint();
+        const connected = listed().filter((s) => !s.disabled && s.connected);
+        await Promise.all(connected.map((t) => run(t.name, 'db_status', {}, null, true)));
+        await load();
+        const c = listed().find((s) => s.central);
+        const ready = listed().filter((s) => !s.disabled && !syncReady(s, c, true));
+        const skipped = listed().filter((s) => !s.disabled && s.connected && syncReady(s, c, true)).map((s) => `${s.name}: ${syncReady(s, c, true)}`);
+        let failed = [];
+        for (const t of ready) {
+          S.busy[t.name + 'sync_preview'] = true; paint();
+          if (!(await run(t.name, 'sync_preview', {}, null, true))) failed.push(t.name);
+        }
+        delete S.busy['*syncread'];
+        await load();
+        status(`Read ${connected.length} server${connected.length === 1 ? '' : 's'}; previewed ${ready.length - failed.length} of ${ready.length}`
+          + (failed.length ? `; failed: ${failed.join(', ')} (see the action log)` : '') + (skipped.length ? `; not previewed: ${skipped.join('; ')}` : ''), !!failed.length);
+      } }, busy ? 'Reading and previewing...' : 'Read All Databases and Preview');
+  }
+
   function syncCard(sv, central) {
     const pv = sv.sync;
     const own = sv.db?.own;
     const cdb = central?.db?.sync;
-    const notReady = !sv.connected ? 'Connect it first' : !central?.connected ? `Connect ${central?.name} first`
-      : own && own.state !== 'running' ? 'Its database is not running (Databases)' : cdb && cdb.state !== 'running' ? `The synchronised database on ${central.name} is not running (Databases)` : '';
+    const notReady = syncReady(sv, central);
     const head = h('div', { class: 'db-top' }, h('b', { class: 'db-name' }, sv.name), sv.connected ? pill('ok', 'Connected') : pill('off', 'Not connected'),
       h('span', { class: 'hint' }, 'Own database'), own ? pgPill(own.state) : h('span', { class: 'hint' }, '? (read the databases)'),
       h('span', { class: 'sp' }),
@@ -483,7 +516,7 @@
       h('div', { class: 'rs-head' }, h('h2', {}, 'Sync'),
         h('span', { class: 'hint' }, central ? `runs, artifacts and checkpoints of each server → the synchronised database on ${central.name}` : 'No central server: choose one in Servers > Edit servers'),
         h('span', { class: 'sp' }),
-        h('span', { class: 'sv-all' }, allButton('connect'), allButton('db_status')), refreshButton()),
+        h('span', { class: 'sv-all' }, allButton('connect'), readAllSyncButton(central)), refreshButton()),
       central ? h('div', { class: 'card sv-card sync-central' },
         h('b', {}, `Into ${central.name}`), cdb ? pgPill(cdb.state) : h('span', { class: 'hint' }, '? (read the databases)'),
         h('code', { class: 'sv-path' }, cdb?.data_directory || cdb?.container?.folder || central.paths_all.sync_db_pattern),
