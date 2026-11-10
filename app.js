@@ -778,7 +778,8 @@ async function editTemplate() {
     wide: true,
     fields: [
       { type: 'note', label: 'Placeholders: @@HEADER@@ (comment lines), @@WORKDIR@@ (project root), @@SHELL_VARS@@ (script variables), '
-        + '@@CONTAINER_ENV@@ (the CONTAINER_ENV array passed with -e), @@LOOP@@ (the selected command loop). Docker flags, git handling and docker cp lines live here.' },
+        + '@@CONTAINER_ENV@@ (the CONTAINER_ENV array passed with -e), @@LOOP@@ (the selected command loop), @@KEEP_LOGS@@ (just before docker start: keeps the output of the job '
+        + 'in job-logs, for Jobs > Past jobs; optional). Docker flags, git handling and docker cp lines live here.' },
       { key: 'text', type: 'area', rows: 28, mono: true, label: 'template.sh', value: text },
     ],
     onSubmit: async (v) => { await api('/api/template', { text: v.text }, 'PUT'); status('Template saved'); schedulePreview(); },

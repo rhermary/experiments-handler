@@ -973,3 +973,6 @@ header #reload { padding: 5px 12px; font-size: 13px; border-radius: 8px; }
 @media (max-width: 700px) { .j-main { grid-template-columns: minmax(0, 1fr); } }
 .j-cmd { font-family: ui-monospace, monospace; }
 .j-logs { margin: 0; max-height: 360px; overflow: auto; padding: 8px; border-radius: 6px; background: var(--code); font-size: 11px; white-space: pre-wrap; }
+.j-past { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--line); }
+.j-past-place { display: grid; gap: 6px; }
+.j-past-item.failed { border-color: var(--err); }

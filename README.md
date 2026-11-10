@@ -37,7 +37,11 @@ A small web app to build, launch and analyse the experiments of a Python researc
   server are read over ssh). It runs in the app (kept in `.queue.json` next to the settings).
 - **Jobs** (side panel): your containers running on this machine and on the connected servers (the ones running as
   you, the launcher's own left out): XP, GPUs, image, how long, the launch that started it, its last output, and
-  Stop (docker stop, asked twice, logged as an action).
+  Stop (docker stop, asked twice, logged as an action). *Past jobs*: the output of every job launched with
+  `@@KEEP_LOGS@@` in the template (just before `docker start`), kept after the job ends with its exit code (Done /
+  Failed), in `job-logs/` next to the settings (this machine) or in `<launcher>/job-logs` (a server): a recorder
+  started by the launch script starts the container attached (`docker start -a`), so even a job that fails at once
+  keeps its output.
 - **Servers** and **Databases**: your GPU servers (add, order, paths of each), one ssh connection per server opened
   when you click Connect, their state (Postgres, GPUs, disk), and the Postgres database of each server (start on a
   dated folder, stop, new dated database). Every action shows its commands before running them, and is logged with

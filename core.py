@@ -747,11 +747,32 @@ def loop_vars(text):
     return list(dict.fromkeys(LOOP_VAR.findall(text)))
 
 
-def render(cfg, sel, workdir=None):
+JOB_LOGS = "job-logs"                    # folder of the jobs' output, next to the settings (here) or in <launcher> (a server)
+
+
+def keep_logs(logdir, xp):
+    """Shell for @@KEEP_LOGS@@ (just before docker start): a detached recorder that starts the container attached
+    (docker start -a: its whole output from the first line, even when it fails at once) into
+    <logdir>/<time>_<xp>_<container id>.log, ended by "[exit N]"; the file stays after --rm removes the container. The
+    template's docker start then finds it running and does nothing (it starts it if the recorder could not)."""
+    q = shlex.quote
+    rec = 'docker start -a "$1" > "$2" 2>&1; echo "[exit $?]" >> "$2"'
+    name = q(logdir) + '/"$(date +%Y%m%d_%H%M%S)_' + slug(xp) + '_${CONTAINER_ID:0:12}.log"'
+    return "\n".join([
+        f"# the output of the job, kept in {logdir} (Jobs > Past jobs): the recorder starts the container attached",
+        'if docker inspect "$CONTAINER_ID" >/dev/null 2>&1; then',
+        f"    mkdir -p {q(logdir)}",
+        f'    (setsid nohup bash -c {q(rec)} keep-logs "$CONTAINER_ID" {name} >/dev/null 2>&1 &)',
+        "    for _ in $(seq 50); do [ \"$(docker inspect -f '{{.State.Status}}' \"$CONTAINER_ID\" 2>/dev/null)\" = created ] || break; sleep 0.1; done",
+        "fi"])
+
+
+def render(cfg, sel, workdir=None, logdir=None):
     """(script, variables, loop info). Variables: script ones become shell assignments, container ones -e flags,
     loop ones (value uses a loop variable, or listed in loop.env) are set inside the loop at @@LOOP_ENV@@.
     workdir: the folder the script runs from (@@WORKDIR@@; default: the project root here; for another server:
-    its copy of the project, remote_launch.py)."""
+    its copy of the project, remote_launch.py); logdir: where @@KEEP_LOGS@@ (before docker start) keeps the output of the job (default:
+    job-logs next to the settings)."""
     table, header = collect(cfg, sel)
     tpl = read_template()
     if "@@SCALARS@@" in tpl or "@@COLUMNS@@" in tpl:
@@ -770,7 +791,8 @@ def render(cfg, sel, workdir=None):
         elif e["env"]:
             env.append(f'    -e "{name}={dq(v)}"')
     slots = {"SHELL_VARS": "\n".join(shell), "CONTAINER_ENV": "CONTAINER_ENV=(\n" + "\n".join(env) + "\n)",
-             "WORKDIR": shlex.quote(str(workdir or project_root(cfg)))}
+             "WORKDIR": shlex.quote(str(workdir or project_root(cfg))),
+             "KEEP_LOGS": keep_logs(str(logdir or state_path(JOB_LOGS)), sel["xp"])}
     row = pick(cfg["loop"]["options"], sel.get("loop"), "command loops")
     header.append(f"# Command loop: {row['name']}")
     if loop_env and "@@LOOP_ENV@@" not in row["value"]:
@@ -828,12 +850,12 @@ def render(cfg, sel, workdir=None):
     return out, list(table.values()), info
 
 
-def generate(cfg, sel, workdir=None, tag=""):
+def generate(cfg, sel, workdir=None, tag="", logdir=None):
     """Write the script of the selection into <scripts_dir>/<XP>/<time>[_<tag>].sh (tag: the server it is for)."""
     root = project_root(cfg)
     if not root.is_dir():
         raise ValueError(f"project root does not exist: {root}")
-    script, _, _ = render(cfg, sel, workdir)
+    script, _, _ = render(cfg, sel, workdir, logdir)
     folder = root / xp_dir(cfg, sel["xp"])
     folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S") + (f"_{slug(tag)}" if tag else "")

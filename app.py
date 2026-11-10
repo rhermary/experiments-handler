@@ -515,7 +515,7 @@ def api_generate():
     cfg = core.load()
     sel = request.get_json(force=True)
     sv = _launch_target(cfg, sel)
-    path = core.generate(cfg, sel, remote_launch.workdir(sv), sv["name"]) if sv else core.generate(cfg, sel)
+    path = core.generate(cfg, sel, remote_launch.workdir(sv), sv["name"], remote_launch.logdir(sv)) if sv else core.generate(cfg, sel)
     return jsonify(path=_rel(cfg, path), server=sv["name"] if sv else None)
 
 
@@ -526,7 +526,7 @@ def _launch_remote(cfg, sel, sv):
     remote_launch.check_selection(table)
     if not remote.connected(sv):
         raise ValueError(f"{sv['name']} is not connected: click Connect in Servers first")
-    path = core.generate(cfg, sel, remote_launch.workdir(sv), sv["name"])
+    path = core.generate(cfg, sel, remote_launch.workdir(sv), sv["name"], remote_launch.logdir(sv))
     config = (table.get(cfg["project"]["config_var"]) or {}).get("value", "").strip()
     done = {}
 
@@ -689,6 +689,19 @@ def api_action(action_id):
 def api_jobs():
     """Your containers running here and on the connected servers (jobs.py)."""
     return jsonify(jobs.listing(core.load()))
+
+
+@app.get("/api/jobs/past")
+def api_jobs_past():
+    """The kept outputs of the jobs (@@KEEP_LOGS@@), here and on the connected servers, newest first."""
+    return jsonify(jobs.past(core.load()))
+
+
+@app.post("/api/jobs/past_log")
+def api_jobs_past_log():
+    """The last lines of a kept output: body {server (none: this machine), name}."""
+    body = request.get_json(force=True)
+    return jsonify(text=jobs.past_log(core.load(), str(body.get("server") or ""), str(body.get("name") or "")))
 
 
 @app.post("/api/jobs/logs")

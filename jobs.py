@@ -6,6 +6,7 @@ Reading them is read-only (docker ps / docker inspect, and a grep of the launch 
 container): not logged as an action. Stopping one is an action (shown, logged): docker stop.
 """
 import json
+import re
 import shlex
 import subprocess
 import time
@@ -15,6 +16,7 @@ from datetime import datetime, timezone
 import actions
 import core
 import remote
+import remote_launch
 
 OWN_PREFIX = "launcher-"                         # the launcher's own containers: not jobs
 LOGS_TAIL = 200
@@ -143,3 +145,79 @@ def stop_steps(cfg, server, cid):
     cmd = f"docker stop --time 30 {cid}"
     argv = remote.ssh_argv(sv, cmd) if sv else ["bash", "-c", cmd]
     return where, [actions.step(f"stop the container {cid} on {where}", argv, timeout=60)]
+
+
+# --------------------------------------------------------------------------- past jobs: the output kept by @@KEEP_LOGS@@
+
+PAST_MAX = 60                                   # logs listed per place (newest first)
+LOG_RE = re.compile(r"^(\d{8}_\d{6})_(.+)_([0-9a-f]{12})\.log$")
+
+
+def _logdir(cfg, server):
+    return remote_launch.logdir(remote.server(cfg, server)) if server else str(core.state_path(core.JOB_LOGS))
+
+
+def _past_script(d):
+    q = shlex.quote(d)
+    return "\n".join([
+        f"D={q}",
+        'ls -t "$D"/*.log 2>/dev/null | head -n ' + str(PAST_MAX) + ' | while read -r f; do',
+        '  echo "@@F|$(basename "$f")|$(stat -c "%s|%Y" "$f")|$(tail -n 1 "$f" | grep -o "^\\[exit [0-9?-]*\\]")"',
+        "done", "exit 0"])
+
+
+def _parse_past(text, running):
+    out = []
+    for ln in text.splitlines():
+        if not ln.startswith("@@F|"):
+            continue
+        _, name, size, mtime, last = (ln.split("|") + [""] * 5)[:5]
+        m = LOG_RE.match(name)
+        if not m:
+            continue
+        stamp, xp, cid = m.groups()
+        code = last[len("[exit "):-1] if last.startswith("[exit ") else None
+        state = "running" if cid in running else "unknown" if code in (None, "?") else "done" if code == "0" else "failed"
+        out.append({"name": name, "xp": xp, "id": cid, "started": f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]} {stamp[9:11]}:{stamp[11:13]}",
+                    "size": int(size) if size.isdigit() else None, "ended": int(mtime) if mtime.isdigit() else None,
+                    "exit": code, "state": state})
+    return out
+
+
+def past(cfg):
+    """{places: [{server, label, connected, jobs: [{name, xp, id, started, size, ended, exit, state}], error}]}:
+    the kept outputs, newest first; state: running (its container still runs), done (exit 0), failed, unknown (the
+    recorder stopped before the job: e.g. the launcher restarted while a job of this machine ran)."""
+    now = listing(cfg)
+    running = {p["server"] or "": {j["id"] for j in p["jobs"]} for p in now["places"]}
+    servers = core.active_servers(cfg)
+
+    def ask(p):
+        if not p["connected"]:
+            return {**p, "jobs": [], "error": p["error"]}
+        try:
+            d = _logdir(cfg, p["server"])
+            if p["server"] is None:
+                r = subprocess.run(["bash", "-s"], input=_past_script(d), capture_output=True, text=True, timeout=30, check=False)
+            else:
+                sv = next(s for s in servers if s["name"] == p["server"])
+                r = subprocess.run(remote.ssh_argv(sv, "bash -s"), input=_past_script(d), capture_output=True, text=True,
+                                   timeout=40, check=False)
+            return {**p, "folder": d, "jobs": _parse_past(r.stdout, running.get(p["server"] or "", set())), "error": ""}
+        except (ValueError, OSError, subprocess.TimeoutExpired) as err:
+            return {**p, "jobs": [], "error": str(err)}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        places = list(pool.map(ask, now["places"]))
+    return {"places": places, "when": now["when"]}
+
+
+def past_log(cfg, server, name, lines=400):
+    """The last `lines` lines of a kept output."""
+    if not LOG_RE.match(name or ""):
+        raise ValueError(f"not a job log: '{name}'")
+    path = _logdir(cfg, server) + "/" + name
+    cmd = f"tail -n {int(lines)} {shlex.quote(path)} 2>&1"
+    sv = _target(cfg, server)
+    argv = remote.ssh_argv(sv, cmd) if sv else ["bash", "-c", cmd]
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=40, check=False, stdin=subprocess.DEVNULL)
+    return (r.stdout or r.stderr)[-200000:]

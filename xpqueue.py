@@ -98,7 +98,7 @@ def add(cfg, sel, mode="auto", count=None, manual=False, server=None):
     if count is not None:
         n = max(1, int(count))
     frozen = dict(sel, values={**(sel.get("values") or {}), **({dvar: TOKEN} if dvar else {})})
-    script, _, _ = core.render(cfg, frozen, remote_launch.workdir(sv) if sv else None)
+    script, _, _ = core.render(cfg, frozen, remote_launch.workdir(sv) if sv else None, remote_launch.logdir(sv) if sv else None)
     item = {"id": uuid.uuid4().hex[:10], "xp": sel["xp"], "options": _summary(cfg, sel),
             "loop": sel.get("loop"), "devices_var": dvar, "mode": mode if dvar else "none",
             "count": n if mode == "auto" else len(fixed or []), "fixed": fixed if mode == "fixed" else None,

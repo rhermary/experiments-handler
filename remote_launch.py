@@ -48,6 +48,11 @@ def workdir(sv):
     return paths(sv)[0]
 
 
+def logdir(sv):
+    """Where the output of the jobs launched on `sv` is kept (@@KEEP_LOGS@@): <launcher>/job-logs there."""
+    return core.server_paths(sv)["launcher"] + "/" + core.JOB_LOGS
+
+
 def _items(cfg):
     """What is copied of the project: the project.snapshot list, else None (all but what .gitignore excludes)."""
     items = str(cfg["project"].get("snapshot") or "").split()

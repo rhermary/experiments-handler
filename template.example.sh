@@ -34,4 +34,6 @@ docker cp . $CONTAINER_ID:/app/
 # base configs written by the app (<scripts_dir>/<XP>/configs, not in git), when the XP uses one
 @@COPY_FILES@@
 
+# keep the output of the job after it ends (Jobs > Past jobs; before docker start); nothing when the line is removed
+@@KEEP_LOGS@@
 docker start $([[ $DEBUG -eq 1 ]] && echo "-ia") $CONTAINER_ID

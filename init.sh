@@ -99,6 +99,7 @@ actions/
 actions.log
 .launcher/
 .artifact-cache/
+job-logs/
 # passwd-format list of the servers' users (names GPU process owners): not for git
 userlist.csv
 EOF
