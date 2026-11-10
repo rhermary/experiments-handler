@@ -5,6 +5,7 @@
 (() => {
   let dlg = null, timer = null, last = null, busy = false, past = null, pastBusy = false;
   const pastOpen = {};                              // "server\u0000log name" -> its output shown
+  const showHidden = {};                            // server -> its hidden outputs listed too
   const open = {};                                  // "server\u0000id" -> the logs shown under a job
   const asking = {};                               // the same key -> waiting for "Confirm stop"
 
@@ -43,35 +44,59 @@
     paint();
   }
 
+  /* hide (or show again) kept outputs: only the listing changes, the log files stay */
+  async function setHidden(p, js, hidden) {
+    if (!js.length) return;
+    js.forEach((j) => { j.hidden = hidden; });
+    paint();
+    try { await api('/api/jobs/past_hide', { server: p.server || '', names: js.map((j) => j.name), hidden }); }
+    catch (e) { js.forEach((j) => { j.hidden = !hidden; }); past.error = e.message; paint(); }
+  }
+
   const STATE = { running: ['ok', 'Running'], done: ['ok', 'Done'], failed: ['bad', 'Failed'], unknown: ['off', 'No exit status'] };
 
   function pastRow(p, j) {
     const k = `${p.server || ''}\u0000${j.name}`;
     const [cls, text] = STATE[j.state] || ['off', j.state];
-    return h('li', { class: 'q-item j-past-item ' + j.state },
+    return h('li', { class: 'q-item j-past-item ' + j.state + (j.hidden ? ' is-hidden' : '') },
       h('div', { class: 'j-main' },
         h('div', { class: 'q-what' }, h('span', { class: 'sv-pill ' + cls, title: j.exit != null ? `exit code ${j.exit}` : 'The recorder stopped before the job (e.g. the launcher restarted)' },
           text + (j.state === 'failed' ? ` (exit ${j.exit})` : '')), ' ', h('b', {}, j.xp), ' ',
           h('span', { class: 'q-opt' }, h('small', {}, 'container'), ' ', j.id)),
         h('span', { class: 'hint' }, `started ${j.started}`),
         h('div', { class: 'q-acts' }, h('button', { type: 'button', class: 'tiny', 'aria-pressed': String(pastOpen[k] !== undefined), onclick: () => showPast(p, j) },
-          pastOpen[k] !== undefined ? 'Hide Output' : 'Output'))),
+          pastOpen[k] !== undefined ? 'Hide Output' : 'Output'),
+          h('button', { type: 'button', class: 'tiny', title: j.hidden ? 'List it again in Past Jobs' : 'Seen: stop listing it (the log file is kept)',
+            onclick: () => setHidden(p, [j], !j.hidden) }, j.hidden ? 'Unhide' : 'Hide'))),
       pastOpen[k] !== undefined ? h('pre', { class: 'j-logs' }, pastOpen[k]) : '');
+  }
+
+  function pastPlace(p) {
+    const key = p.server || '';
+    const visible = p.jobs.filter((j) => !j.hidden), hidden = p.jobs.filter((j) => j.hidden);
+    const finished = visible.filter((j) => j.state !== 'running');
+    const listed = showHidden[key] ? p.jobs : visible;
+    return h('div', { class: 'j-past-place' },
+      h('div', { class: 'pk-head' }, h('h4', {}, p.label, ' ', h('span', { class: 'hint' }, p.error || p.folder || '')),
+        h('span', { class: 'sp' }),
+        hidden.length ? h('button', { type: 'button', class: 'tiny', 'aria-pressed': String(!!showHidden[key]),
+          onclick: () => { showHidden[key] = !showHidden[key]; paint(); } }, showHidden[key] ? `Leave Out ${hidden.length} Hidden` : `Show ${hidden.length} Hidden`) : '',
+        finished.length ? h('button', { type: 'button', class: 'tiny', title: 'Hide every listed job that has ended (the log files are kept)',
+          onclick: () => setHidden(p, finished, true) }, `Hide ${finished.length} Ended`) : ''),
+      listed.length ? h('ol', { class: 'q-list' }, ...listed.map((j) => pastRow(p, j))) : '');
   }
 
   function pastSection() {
     const places = (past?.places || []).filter((p) => p.jobs.length || p.error);
-    const n = (past?.places || []).reduce((a, p) => a + p.jobs.length, 0);
+    const n = (past?.places || []).reduce((a, p) => a + p.jobs.filter((j) => !j.hidden).length, 0);
     return h('section', { class: 'j-place j-past' },
       h('div', { class: 'pk-head' }, h('h4', {}, 'Past Jobs'),
-        h('span', { class: 'hint' }, past ? `${n} kept output${n === 1 ? '' : 's'} (the last ${60} per server), read at ${past.when || '...'}` : 'The outputs kept by the launches'),
+        h('span', { class: 'hint' }, past ? `${n} kept output${n === 1 ? '' : 's'} (the last ${60} per server, hidden ones left out), read at ${past.when || '...'}` : 'The outputs kept by the launches'),
         h('span', { class: 'sp' }),
         h('button', { type: 'button', class: 'ghost', onclick: refreshPast }, pastBusy ? 'Reading...' : past ? 'Read Again' : 'Read')),
       past?.error ? h('p', { class: 'dlg-err' }, past.error) : '',
-      past && !n ? h('p', { class: 'hint' }, 'No kept output yet: the jobs launched from now on keep theirs (@@KEEP_LOGS@@ in the template).') : '',
-      ...places.map((p) => h('div', { class: 'j-past-place' },
-        h('h4', {}, p.label, ' ', h('span', { class: 'hint' }, p.error || p.folder || '')),
-        p.jobs.length ? h('ol', { class: 'q-list' }, ...p.jobs.map((j) => pastRow(p, j))) : '')));
+      past && !n && !(past.places || []).some((p) => p.jobs.length) ? h('p', { class: 'hint' }, 'No kept output yet: the jobs launched from now on keep theirs (@@KEEP_LOGS@@ in the template).') : '',
+      ...places.map(pastPlace));
   }
 
   async function showLogs(p, j) {

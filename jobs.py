@@ -8,7 +8,9 @@ container): not logged as an action. Stopping one is an action (shown, logged): 
 import json
 import re
 import shlex
+import os
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -153,15 +155,66 @@ PAST_MAX = 60                                   # logs listed per place (newest 
 LOG_RE = re.compile(r"^(\d{8}_\d{6})_(.+)_([0-9a-f]{12})\.log$")
 
 
+_HIDDEN_LOCK = threading.Lock()
+
+
+def _hidden_path():
+    return core.state_path(".hidden-jobs.json")
+
+
+def _load_hidden():
+    """{place ("" for this machine, else the server name): set of log names hidden from Past Jobs}."""
+    try:
+        data = json.loads(_hidden_path().read_text())
+    except (OSError, ValueError):
+        data = {}
+    return {str(k): set(v or []) for k, v in data.items()} if isinstance(data, dict) else {}
+
+
+def _save_hidden(hidden):
+    path = _hidden_path()
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps({k: sorted(v) for k, v in hidden.items() if v}, indent=1))
+    os.replace(tmp, path)
+
+
+def hide_past(server, names, hidden=True):
+    """Hide (or show again) kept outputs in Past Jobs. Only the listing changes: the log files stay where they are.
+
+    Args:
+        server: The server name, empty for this machine.
+        names: The log names.
+        hidden: True to hide them, False to show them again.
+
+    Returns:
+        How many outputs of that place are hidden now.
+
+    Raises:
+        ValueError: When a name is not a job log.
+    """
+    bad = [n for n in names if not LOG_RE.match(n or "")]
+    if bad:
+        raise ValueError(f"not a job log: '{bad[0]}'")
+    with _HIDDEN_LOCK:
+        all_hidden = _load_hidden()
+        place = all_hidden.setdefault(server or "", set())
+        if hidden:
+            place.update(names)
+        else:
+            place.difference_update(names)
+        _save_hidden(all_hidden)
+        return len(place)
+
+
 def _logdir(cfg, server):
     return remote_launch.logdir(remote.server(cfg, server)) if server else str(core.state_path(core.JOB_LOGS))
 
 
-def _past_script(d):
+def _past_script(d, limit=PAST_MAX):
     q = shlex.quote(d)
     return "\n".join([
         f"D={q}",
-        'ls -t "$D"/*.log 2>/dev/null | head -n ' + str(PAST_MAX) + ' | while read -r f; do',
+        'ls -t "$D"/*.log 2>/dev/null | head -n ' + str(int(limit)) + ' | while read -r f; do',
         '  echo "@@F|$(basename "$f")|$(stat -c "%s|%Y" "$f")|$(tail -n 1 "$f" | grep -o "^\\[exit [0-9?-]*\\]")"',
         "done", "exit 0"])
 
@@ -187,28 +240,49 @@ def _parse_past(text, running):
 def past(cfg):
     """{places: [{server, label, connected, jobs: [{name, xp, id, started, size, ended, exit, state}], error}]}:
     the kept outputs, newest first; state: running (its container still runs), done (exit 0), failed, unknown (the
-    recorder stopped before the job: e.g. the launcher restarted while a job of this machine ran)."""
+    recorder stopped before the job: e.g. the launcher restarted while a job of this machine ran). Each job also has
+    `hidden` (Hide in Past Jobs); the hidden ones do not count in the PAST_MAX listed per place."""
     now = listing(cfg)
     running = {p["server"] or "": {j["id"] for j in p["jobs"]} for p in now["places"]}
     servers = core.active_servers(cfg)
+    with _HIDDEN_LOCK:
+        hidden = _load_hidden()
 
     def ask(p):
         if not p["connected"]:
             return {**p, "jobs": [], "error": p["error"]}
+        mine = hidden.get(p["server"] or "", set())
+        limit = PAST_MAX + len(mine)
         try:
             d = _logdir(cfg, p["server"])
             if p["server"] is None:
-                r = subprocess.run(["bash", "-s"], input=_past_script(d), capture_output=True, text=True, timeout=30, check=False)
+                r = subprocess.run(["bash", "-s"], input=_past_script(d, limit), capture_output=True, text=True, timeout=30,
+                                   check=False)
             else:
                 sv = next(s for s in servers if s["name"] == p["server"])
-                r = subprocess.run(remote.ssh_argv(sv, "bash -s"), input=_past_script(d), capture_output=True, text=True,
-                                   timeout=40, check=False)
-            return {**p, "folder": d, "jobs": _parse_past(r.stdout, running.get(p["server"] or "", set())), "error": ""}
+                r = subprocess.run(remote.ssh_argv(sv, "bash -s"), input=_past_script(d, limit), capture_output=True,
+                                   text=True, timeout=40, check=False)
+            jobs = _parse_past(r.stdout, running.get(p["server"] or "", set()))
+            for j in jobs:
+                j["hidden"] = j["name"] in mine
+            if r.returncode == 0 and len(jobs) < limit:      # the whole folder was listed: forget the deleted logs
+                _forget_missing(p["server"] or "", {j["name"] for j in jobs})
+            shown = [j for j in jobs if not j["hidden"]][:PAST_MAX]
+            return {**p, "folder": d, "jobs": shown + [j for j in jobs if j["hidden"]], "error": ""}
         except (ValueError, OSError, subprocess.TimeoutExpired) as err:
             return {**p, "jobs": [], "error": str(err)}
     with ThreadPoolExecutor(max_workers=8) as pool:
         places = list(pool.map(ask, now["places"]))
     return {"places": places, "when": now["when"]}
+
+
+def _forget_missing(server, present):
+    with _HIDDEN_LOCK:
+        all_hidden = _load_hidden()
+        place = all_hidden.get(server, set())
+        if place - present:
+            all_hidden[server] = place & present
+            _save_hidden(all_hidden)
 
 
 def past_log(cfg, server, name, lines=400):

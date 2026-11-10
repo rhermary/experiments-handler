@@ -976,3 +976,5 @@ header #reload { padding: 5px 12px; font-size: 13px; border-radius: 8px; }
 .j-past { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--line); }
 .j-past-place { display: grid; gap: 6px; }
 .j-past-item.failed { border-color: var(--err); }
+.j-past-item.is-hidden { opacity: .55; }
+.j-past-place > .pk-head h4 { margin: 0; }

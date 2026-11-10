@@ -697,6 +697,19 @@ def api_jobs_past():
     return jsonify(jobs.past(core.load()))
 
 
+@app.post("/api/jobs/past_hide")
+def api_jobs_past_hide():
+    """Hide kept outputs from Past Jobs, or show them again: body {server (none: this machine), names, hidden}.
+    Only the listing changes (.hidden-jobs.json next to the settings); the log files are kept."""
+    body = request.get_json(force=True)
+    try:
+        n = jobs.hide_past(str(body.get("server") or ""), [str(x) for x in body.get("names") or []],
+                           body.get("hidden", True) is not False)
+    except ValueError as err:
+        return jsonify(error=str(err)), 400
+    return jsonify(hidden=n)
+
+
 @app.post("/api/jobs/past_log")
 def api_jobs_past_log():
     """The last lines of a kept output: body {server (none: this machine), name}."""

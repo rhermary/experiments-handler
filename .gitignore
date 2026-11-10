@@ -8,5 +8,6 @@ userlist.csv
 .gpu-servers.json
 .mlflow-server.log
 .queue.json*
+.hidden-jobs.json*
 actions.log
 actions/
