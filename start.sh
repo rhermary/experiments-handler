@@ -6,6 +6,7 @@
 #   tools/experiments-handler/start.sh --port 5930    # another port (other options are passed to app.py: --template)
 #   tools/experiments-handler/start.sh logs           # its output (docker logs -f: Ctrl+C leaves it running)
 #   tools/experiments-handler/start.sh status | stop  # is it running / stop it (and the MLflow server it started)
+#   tools/experiments-handler/start.sh agent          # lend the ssh agent of this terminal again (no restart)
 #   tools/experiments-handler/start.sh --attach       # in this terminal, until Ctrl+C
 #   tools/experiments-handler/start.sh --no-container # with this machine's python, in this terminal (PYTHON=...)
 #   LAUNCHER_IMAGE=me/myproject:1.0 LAUNCHER_PORT=5930 LAUNCHER_BIND=127.0.0.1 tools/experiments-handler/start.sh
@@ -38,13 +39,14 @@
 # Its ssh connections are its own: click Connect in Servers after each start.
 #
 # In the background, the container keeps running when the terminal closes; the relay of the ssh agent stops with it.
-# It uses the agent of the terminal it was started from: if that one goes away (VS Code closed), start again.
+# It uses the agent of the terminal it was started from; when that one stops answering (the VS Code window closed), the
+# relay uses another VS Code agent of this machine that answers. "start.sh agent" points it at this terminal's agent.
 set -euo pipefail
 
 handler="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="${XP_PROJECT:-$(cd "$handler/../.." && pwd)}"
 link="$root/tools/experiments"
-py="${PYTHON:-python}"
+py="${PYTHON:-$(command -v python3 || command -v python)}"
 
 if [[ ! -f "$link/experiments.yaml" ]]; then
     echo "no settings in $link: run $handler/init.sh first" >&2
@@ -53,7 +55,7 @@ fi
 data="$(cd "$link" && pwd -P)"
 state="$data/.launcher"
 name="${LAUNCHER_NAME:-launcher-app-$(id -u)}"
-relay_pidfile="$state/run/relay.pid"
+relay_pidfile="$state/run/relay-$name.pid"
 
 stop_relay() {
     if [[ -f "$relay_pidfile" ]]; then
@@ -63,6 +65,19 @@ stop_relay() {
     fi
 }
 running() { [[ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" == true ]]; }
+# the agent as the container sees it (the one of the running container: it may have been started by an older start.sh)
+lent=$( (docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$name" 2>/dev/null || true) | sed -n 's/^SSH_AUTH_SOCK=//p' | head -n 1)
+lent="${lent:-$state/run/ssh-agent-$name.sock}"
+# its first name (one launcher, before the files were per container): the default launcher's
+if [[ "$name" == "launcher-app-$(id -u)" && -f "$state/run/relay.pid" && ! -f "$relay_pidfile" ]]; then mv "$state/run/relay.pid" "$relay_pidfile"; fi
+start_relay() {
+    [[ -n "$lent" ]] || return 0
+    # its own session: it outlives this terminal; it waits for the container and stops with it. Its messages (an
+    # agent that stopped answering, the one used instead) go to run/relay.log
+    setsid nohup bash -c '"$1" "$2" "$3" "$4" 2>>"$7" & r=$!; docker wait "$5" >/dev/null 2>&1; kill $r 2>/dev/null; rm -f "$6"' \
+        relay "$py" "$handler/agent_relay.py" "$lent" "$SSH_AUTH_SOCK" "$name" "$relay_pidfile" "$state/run/relay.log" >/dev/null 2>&1 &
+    echo $! > "$relay_pidfile"
+}
 
 case "${1:-}" in
     stop)
@@ -79,6 +94,19 @@ case "${1:-}" in
         exit 0 ;;
     logs)
         exec docker logs --follow --tail 100 "$name" ;;
+    agent)
+        # lend the agent of this terminal again, without restarting the launcher
+        if ! running; then echo "$name is not running: start it first" >&2; exit 1; fi
+        if [[ -z "${SSH_AUTH_SOCK:-}" || ! -S "$SSH_AUTH_SOCK" ]]; then echo "no ssh agent in this terminal (SSH_AUTH_SOCK)" >&2; exit 1; fi
+        stop_relay
+        start_relay
+        sleep 1
+        if SSH_AUTH_SOCK="$lent" ssh-add -l >/dev/null 2>&1; then
+            echo "the launcher uses the ssh agent of this terminal ($SSH_AUTH_SOCK): Connect again in Servers"
+        else
+            echo "the relay started, but the agent does not answer through it (see $state/run/relay.log)" >&2; exit 1
+        fi
+        exit 0 ;;
 esac
 
 # args: for app.py without a container (as given); cargs: in the container, without --host/--port (it listens on
@@ -152,7 +180,11 @@ if running; then echo "replacing the running $name"; docker stop --time 20 "$nam
 docker rm --force "$name" >/dev/null 2>&1 || true          # left by a launcher that stopped or was killed
 stop_relay
 
-# the copy of the project, with the launcher's code, and tools/experiments: the data folder itself
+# the copy of the project, with the launcher's code, and tools/experiments: the data folder itself. Started from that
+# copy (a terminal on the server, where the project itself is not reachable): it is used as it is
+if [[ "$(cd "$root" && pwd -P)" == "$(mkdir -p "$snap" && cd "$snap" && pwd -P)" ]]; then
+    echo "using the last copy of the project ($snap, of $(date -r "$snap/tools/experiments-handler" '+%Y-%m-%d %H:%M')): start from the project to refresh it"
+else
 echo "copying the project to $snap..."
 mkdir -p "$snap/tools"
 skip=(--exclude __pycache__ --exclude .mypy_cache)
@@ -169,6 +201,7 @@ else
 fi
 rsync -a --delete "${skip[@]}" "$handler" "$snap/tools/"
 ln -sfn "$data" "$snap/tools/experiments"
+fi
 
 # the container's home, the docker command
 mkdir -p -m 700 "$state/home/.ssh"
@@ -189,18 +222,11 @@ docker_gid=$(stat -c %g "$sock")
 # the ssh agent, lent through a socket in run/ (the relay starts once the container exists, and stops with it)
 agent=() lent=""
 if [[ -n "${SSH_AUTH_SOCK:-}" && -S "$SSH_AUTH_SOCK" ]]; then
-    lent="$state/run/ssh-agent.sock"
+    lent="$state/run/ssh-agent-$name.sock"
     agent=(-e "SSH_AUTH_SOCK=$lent")
 else
     echo "no ssh agent (SSH_AUTH_SOCK): the launcher will not be able to connect to the servers" >&2
 fi
-start_relay() {
-    [[ -n "$lent" ]] || return 0
-    # its own session: it outlives this terminal; it waits for the container and stops with it
-    setsid nohup bash -c '"$1" "$2" "$3" "$4" & r=$!; docker wait "$5" >/dev/null 2>&1; kill $r 2>/dev/null; rm -f "$6"' \
-        relay "$py" "$handler/agent_relay.py" "$lent" "$SSH_AUTH_SOCK" "$name" "$relay_pidfile" >/dev/null 2>&1 &
-    echo $! > "$relay_pidfile"
-}
 
 mode=(--detach)
 if $attach; then

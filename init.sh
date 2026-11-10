@@ -112,6 +112,9 @@ fi
     echo 'here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"'
     echo 'start="${here%/*}/experiments-handler/start.sh"'
     printf '[[ -f "$start" ]] || start=%q\n' "$handler/start.sh"
+    echo '# on the server itself (a terminal, where the project is not reachable): the last copy of the project'
+    echo '[[ -f "$start" ]] || start=$(ls -d "$(cd "$here" && pwd -P)"/.launcher/snapshot/*/tools/experiments-handler/start.sh 2>/dev/null | head -n 1)'
+    echo 'if [[ -z "$start" || ! -f "$start" ]]; then echo "no experiments-handler/start.sh found (next to $here, or in its .launcher/snapshot)" >&2; exit 1; fi'
     echo 'exec "$start" "$@"'
 } > "$data/start.sh"
 chmod +x "$data/start.sh"
