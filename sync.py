@@ -289,13 +289,15 @@ def _files_cmd(src_sv, dst_sv, kind, src_id, d_id, runs):
     sp, dp = core.server_paths(src_sv), core.server_paths(dst_sv)
     s_root, d_root = (sp["artifacts"], dp["sync_artifacts"]) if kind == "a" else (sp["checkpoints"], dp["sync_checkpoints"])
     q = shlex.quote
-    unpack = f"mkdir -p {q(d_root)} && tar -C {q(d_root)} -xf - --transform=s,^{src_id}/,{d_id}/,"
+    mkdir = f"mkdir -p {q(d_root)}"
+    untar = f"tar -C {q(d_root)} -xf - --transform=s,^{src_id}/,{d_id}/,"
     pack = f"tar -C {q(s_root)} -cf - -T -"
     ssh = lambda sv: shlex.join(remote.ssh_argv(sv))     # noqa: E731  (the remote commands below: paths and tar only)
+    # mkdir first: in `pack | mkdir && untar`, the archive would go to mkdir and untar would read an empty stdin
     if src_sv["name"] == dst_sv["name"]:
-        cmd = f'{ssh(src_sv)} "{pack} | {unpack}"'
+        cmd = f'{ssh(src_sv)} "{mkdir} && {pack} | {untar}"'
     else:
-        cmd = f'{ssh(src_sv)} "{pack}" | {ssh(dst_sv)} "{unpack}"'
+        cmd = f'{ssh(src_sv)} "{pack}" | {ssh(dst_sv)} "{mkdir} && {untar}"'
     return "set -o pipefail; " + cmd, "".join(f"{src_id}/{r}\n" for r in runs)
 
 
