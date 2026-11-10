@@ -529,39 +529,6 @@
         h('div', { class: 'rs-scroll' }, logTable('sync'))));
   }
 
-  /* ---------- editing the list of servers ---------- */
-
-  function editServers() {
-    const all = clone(cfg.servers);
-    let d = $('#sveditdlg');
-    if (!d) { d = h('dialog', { id: 'sveditdlg', class: 'wide svdlg', 'aria-labelledby': 'sve-title' }); document.body.append(d); }
-    const rows = all.filter((s) => 'name' in s);
-    const comments = all.filter((s) => !('name' in s));
-    const err = h('p', { class: 'dlg-err', hidden: '' });
-    const body = h('div', { class: 'sve-list' });
-    const open = new Set();
-    const draw = () => {
-      body.replaceChildren(...rows.map((s, i) => {
-        const inp = (key, ph, w) => {
-          const e = h('input', { type: 'text', value: s[key] ?? '', placeholder: ph, class: 'mono', style: w ? `width:${w}` : null, 'aria-label': `${key} of server ${i + 1}` });
-          e.addEventListener('input', () => { s[key] = key === 'port' ? e.value : e.value.trim(); });
-          return e;
-        };
-        const central = h('input', { type: 'radio', name: 'sve-central', checked: s.central ? '' : null, 'aria-label': `${s.name || 'server'} is the central server` });
-        central.addEventListener('change', () => { rows.forEach((x) => { delete x.central; }); s.central = true; draw(); });
-        const off = h('input', { type: 'checkbox', checked: s.disabled ? '' : null, 'aria-label': `${s.name || 'server'} is commented out` });
-        off.addEventListener('change', () => { if (off.checked) s.disabled = true; else delete s.disabled; });
-        const move = (j) => { const [x] = rows.splice(i, 1); rows.splice(j, 0, x); draw(); };
-        const pathBox = h('div', { class: 'sve-paths', hidden: open.has(s) ? null : '' }, ...Object.keys(LABELS).filter((k) => s.central || !CENTRAL_KEYS.has(k)).map((k) => {
-          const e = h('input', { type: 'text', class: 'mono', value: (s.paths || {})[k] || '', placeholder: '(default)', 'aria-label': `${LABELS[k][0]} of ${s.name}` });
-          e.addEventListener('input', () => { s.paths = { ...(s.paths || {}) }; if (e.value.trim()) s.paths[k] = e.value.trim(); else delete s.paths[k]; });
-          return h('label', {}, h('span', {}, LABELS[k][0], h('small', {}, LABELS[k][1])), e);
-        }));
-        const nPaths = Object.keys(s.paths || {}).length;
-        return h('div', { class: 'sve-row' },
-          h('div', { class: 'sve-main' },
-            h('span', { class: 'sve-move' },
-              h('button', { type: 'button', class: 'sv-btn', disabled: i === 0 ? '' : null, 'aria-label': `Move ${s.name} up`, onclick: () => move(i - 1) }, '↑'),
   /* ---------- Datasets tab: the processed folders of your datasets on each server, sent from a source ---------- */
 
   const kb = (k) => (k == null ? '' : gb(k * 1024));
@@ -651,6 +618,39 @@
         h('div', { class: 'rs-scroll' }, logTable('ds'))));
   }
 
+  /* ---------- editing the list of servers ---------- */
+
+  function editServers() {
+    const all = clone(cfg.servers);
+    let d = $('#sveditdlg');
+    if (!d) { d = h('dialog', { id: 'sveditdlg', class: 'wide svdlg', 'aria-labelledby': 'sve-title' }); document.body.append(d); }
+    const rows = all.filter((s) => 'name' in s);
+    const comments = all.filter((s) => !('name' in s));
+    const err = h('p', { class: 'dlg-err', hidden: '' });
+    const body = h('div', { class: 'sve-list' });
+    const open = new Set();
+    const draw = () => {
+      body.replaceChildren(...rows.map((s, i) => {
+        const inp = (key, ph, w) => {
+          const e = h('input', { type: 'text', value: s[key] ?? '', placeholder: ph, class: 'mono', style: w ? `width:${w}` : null, 'aria-label': `${key} of server ${i + 1}` });
+          e.addEventListener('input', () => { s[key] = key === 'port' ? e.value : e.value.trim(); });
+          return e;
+        };
+        const central = h('input', { type: 'radio', name: 'sve-central', checked: s.central ? '' : null, 'aria-label': `${s.name || 'server'} is the central server` });
+        central.addEventListener('change', () => { rows.forEach((x) => { delete x.central; }); s.central = true; draw(); });
+        const off = h('input', { type: 'checkbox', checked: s.disabled ? '' : null, 'aria-label': `${s.name || 'server'} is commented out` });
+        off.addEventListener('change', () => { if (off.checked) s.disabled = true; else delete s.disabled; });
+        const move = (j) => { const [x] = rows.splice(i, 1); rows.splice(j, 0, x); draw(); };
+        const pathBox = h('div', { class: 'sve-paths', hidden: open.has(s) ? null : '' }, ...Object.keys(LABELS).filter((k) => s.central || !CENTRAL_KEYS.has(k)).map((k) => {
+          const e = h('input', { type: 'text', class: 'mono', value: (s.paths || {})[k] || '', placeholder: '(default)', 'aria-label': `${LABELS[k][0]} of ${s.name}` });
+          e.addEventListener('input', () => { s.paths = { ...(s.paths || {}) }; if (e.value.trim()) s.paths[k] = e.value.trim(); else delete s.paths[k]; });
+          return h('label', {}, h('span', {}, LABELS[k][0], h('small', {}, LABELS[k][1])), e);
+        }));
+        const nPaths = Object.keys(s.paths || {}).length;
+        return h('div', { class: 'sve-row' },
+          h('div', { class: 'sve-main' },
+            h('span', { class: 'sve-move' },
+              h('button', { type: 'button', class: 'sv-btn', disabled: i === 0 ? '' : null, 'aria-label': `Move ${s.name} up`, onclick: () => move(i - 1) }, '↑'),
               h('button', { type: 'button', class: 'sv-btn', disabled: i === rows.length - 1 ? '' : null, 'aria-label': `Move ${s.name} down`, onclick: () => move(i + 1) }, '↓')),
             inp('name', 'name', '9em'), inp('host', 'Host or address', '14em'), inp('port', '22', '4.5em'), inp('user', 'user', '8em'),
             h('label', { class: 'sve-flag', title: 'Where the synchronised data lives (one server)' }, central, 'central'),
