@@ -21,6 +21,7 @@ from flask import Flask, Response, jsonify, request, send_file, send_from_direct
 import checker
 import core
 import actions
+import datasets
 import diffview
 import remote
 import remote_launch
@@ -575,7 +576,7 @@ _STATUS = {}                                                 # server name -> it
 
 def _server_view(sv, cfg=None):
     return {**sv, "paths_all": core.server_paths(sv), "connected": remote.connected(sv), "status": _STATUS.get(sv["name"]),
-            "db": _DB.get(sv["name"]), "image_default": _image(cfg or core.load(), sv),
+            "db": _DB.get(sv["name"]), "datasets": _DS.get(sv["name"]), "image_default": _image(cfg or core.load(), sv),
             "sync": sync.light(sync.PLANS.get(sv["name"])), "synced": {k: _SYNCED[sv["name"], k] for k in ("results", "checkpoints") if (sv["name"], k) in _SYNCED}}
 
 
@@ -590,6 +591,7 @@ def api_servers():
 
 
 _DB = {}                                                     # server name -> its databases from the last "db_status"
+_DS = {}                                                     # server name -> its datasets from the last "ds_status"
 
 
 def _image(cfg, sv=None):
@@ -612,6 +614,8 @@ SERVER_ACTIONS = {
     "db_scripts": ("show the database scripts", lambda cfg, sv, a: remote.db_scripts_steps(sv)),
     "sync_preview": ("preview the sync to the central server", lambda cfg, sv, a: sync.preview_steps(sv, core.central_server(cfg))),
     "sync_run": ("sync the results to the central server", lambda cfg, sv, a: sync.sync_steps(sv, core.central_server(cfg), a.get("experiments") or [])),
+    "ds_status": ("read the datasets", lambda cfg, sv, a: datasets.status_steps(sv)),
+    "ds_send": ("send datasets", lambda cfg, sv, a: datasets.send_steps(cfg, sv, a)),
     "sync_ckpt": ("sync the checkpoints to the central server", lambda cfg, sv, a: sync.ckpt_steps(sv, core.central_server(cfg), a.get("experiments") or [])),
 }
 _SYNCED = {}                                                 # (server name, results|checkpoints) -> the last sync: {when, id, ok, out}
@@ -645,6 +649,8 @@ def api_servers_run():
         _STATUS[sv["name"]] = {**remote.parse_status(res["steps"][0]["out"]), "when": res["when"]}
     if body["action"] == "db_status" and res["ok"]:
         _DB[sv["name"]] = {**remote.parse_db_status(sv, res["steps"][0]["out"]), "when": res["when"]}
+    if body["action"] == "ds_status" and res["ok"]:
+        _DS[sv["name"]] = {**datasets.parse_status(res["steps"][0]["out"]), "when": res["when"]}
     if body["action"] == "db_sizes" and res["ok"]:
         sizes = {ln.split("\t", 1)[1]: int(ln.split("\t", 1)[0]) for ln in res["steps"][0]["out"].splitlines() if "\t" in ln}
         _DB.setdefault(sv["name"], {}).setdefault("sizes", {}).update(sizes)
@@ -661,6 +667,7 @@ def api_servers_run():
     if body["action"] == "disconnect":
         _STATUS.pop(sv["name"], None)
         _DB.pop(sv["name"], None)
+        _DS.pop(sv["name"], None)
     return jsonify(result={k: v for k, v in res.items() if k != "steps"}, steps=res["steps"], server=_server_view(sv, cfg))
 
 

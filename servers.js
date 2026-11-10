@@ -15,6 +15,7 @@
     sync_port: ['Synchronised Postgres port', 'Central server only'],
     db_image: ['Database image', 'Default image to start the databases in (else the Docker image variable); can be changed at each start'],
     ui_port: ['Own MLflow UI port', 'On the server'], sync_ui_port: ['Synchronised MLflow UI port', 'On the server'],
+    datasets: ['Datasets folder', 'Your datasets: <name>/processed (Datasets tab)'],
   };
   const DERIVED = [['repo', 'Repo mirror'], ['launches', 'Launch folders'], ['queue', 'Queue'], ['sync_db_pattern', 'Synchronised databases'],
     ['sync_artifacts', 'Synchronised artifacts'], ['sync_checkpoints', 'Synchronised checkpoints']];
@@ -51,7 +52,8 @@
       if (quiet) { delete S.busy[server + action]; return r.result.ok; }
       status(`${r.result.title} ${r.result.ok ? 'done' : 'failed'}${after && r.result.ok ? `: ${after}` : ''}`, !r.result.ok,
         { label: 'Commands and output', fn: () => commandsDialog(r.result.title, r.steps, r.result.id) });
-      if (!r.result.ok || ['db_scripts', 'db_start', 'db_new', 'sync_run', 'sync_ckpt'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
+      if (!r.result.ok || ['db_scripts', 'db_start', 'db_new', 'sync_run', 'sync_ckpt', 'ds_send'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
+      if (action === 'ds_send') await run(server, 'ds_status', {}, null, true);          // what it has now
     } catch (e) {
       if (quiet) { delete S.busy[server + action]; return false; }
       status(e.message, true);
@@ -67,6 +69,7 @@
     disconnect: ['Disconnect all', (s) => s.connected],
     status: ['Read all states', (s) => !s.disabled && s.connected],
     db_status: ['Read all databases', (s) => !s.disabled && s.connected],
+    ds_status: ['Read all datasets', (s) => !s.disabled && s.connected],
   };
 
   function allButton(action, opts = {}) {
@@ -213,7 +216,7 @@
       h('thead', {}, h('tr', {}, ...['When', 'Action', 'Server', 'Steps', 'Result', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, ...rows.slice(0, 40).map((a) => h('tr', {},
         h('td', { class: 'hint' }, a.when), h('td', {}, a.title), h('td', {}, a.server || '-'), h('td', { class: 'num' }, String(a.steps)),
-        h('td', {}, a.ok ? pill('ok', 'done') : pill('bad', 'failed')),
+        h('td', {}, a.ok ? pill('ok', 'Done') : pill('bad', 'Failed')),
         h('td', {}, h('button', { type: 'button', class: 'sv-btn', onclick: () => openLog(a.id) }, 'Commands and Output'))))));
   }
 
@@ -395,7 +398,7 @@
     const box = S.tab && $(`#${S.tab}tab`);
     if (!box) return;
     if (!S.data) { box.replaceChildren(h('p', { class: 'empty' }, 'Reading the servers...')); return; }
-    if (S.tab === 'servers') paintServers(box); else if (S.tab === 'sync') paintSync(box); else paintDatabases(box);
+    if (S.tab === 'servers') paintServers(box); else if (S.tab === 'sync') paintSync(box); else if (S.tab === 'datasets') paintDatasets(box); else paintDatabases(box);
   }
 
   /* ---------- Sync tab ---------- */
@@ -526,6 +529,95 @@
           h('div', { class: 'sve-main' },
             h('span', { class: 'sve-move' },
               h('button', { type: 'button', class: 'sv-btn', disabled: i === 0 ? '' : null, 'aria-label': `Move ${s.name} up`, onclick: () => move(i - 1) }, '↑'),
+  /* ---------- Datasets tab: the processed folders of your datasets on each server, sent from a source ---------- */
+
+  const kb = (k) => (k == null ? '' : gb(k * 1024));
+  S.dsSel = S.dsSel || {};
+
+  function paintDatasets(box) {
+    const servers = listed().filter((s) => !s.disabled);
+    const central = servers.find((s) => s.central);
+    S.dsSource = servers.some((s) => s.name === S.dsSource) ? S.dsSource : (central || servers[0])?.name;
+    const src = servers.find((s) => s.name === S.dsSource);
+    const pick = h('select', { 'aria-label': 'Source server' }, ...servers.map((s) => h('option', { value: s.name }, s.name + (s.central ? ' (central)' : ''))));
+    pick.value = S.dsSource || '';
+    pick.addEventListener('change', () => { S.dsSource = pick.value; S.dsSel = {}; paint(); });
+    const targets = servers.filter((s) => s.name !== S.dsSource);
+    const sds = src?.datasets;
+    const ignored = new Set(String(cfg.project.datasets_ignore || '').split(/\s+/).filter(Boolean));
+    const all = Object.keys(sds?.datasets || {}).sort((a, b) => a.localeCompare(b));
+    const names = all.filter((n) => !ignored.has(n));
+    const hidden = all.filter((n) => ignored.has(n));
+    const setIgnored = (n, on) => commit((c) => {
+      const now = new Set(String(c.project.datasets_ignore || '').split(/\s+/).filter(Boolean));
+      if (on) now.add(n); else now.delete(n);
+      c.project.datasets_ignore = [...now].sort().join(' ');
+    }).then(() => { S.dsSel = {}; paint(); status(on ? `${n} is ignored in the Datasets tab (Show again below the table)` : `${n} is listed again`); })
+      .catch((e) => status(e.message, true));
+    const state = (t, n) => {
+      const there = t.datasets?.datasets?.[n], here = sds.datasets[n];
+      if (!t.datasets) return 'unknown';
+      if (!there) return 'missing';
+      return there.digest && there.digest === here.digest ? 'same' : 'differs';
+    };
+    const selOf = (t) => (S.dsSel[t.name] ??= new Set(names.filter((n) => ['missing', 'differs'].includes(state(t, n)))));
+    const cell = (t, n) => {
+      const st = state(t, n), there = t.datasets?.datasets?.[n];
+      if (st === 'unknown') return h('td', { class: 'ds-cell hint' }, '?');
+      if (st === 'same') return h('td', { class: 'ds-cell' }, pill('ok', 'Same'), ' ', h('span', { class: 'hint' }, there.when));
+      const set = selOf(t);
+      const cb = h('input', { type: 'checkbox', checked: set.has(n) ? '' : null, 'aria-label': `Send ${n} to ${t.name}` });
+      cb.addEventListener('change', () => { if (cb.checked) set.add(n); else set.delete(n); paint(); });
+      return h('td', { class: 'ds-cell' }, h('label', {}, cb, st === 'missing' ? pill('bad', 'Missing') : pill('warn', 'Differs'),
+        there ? h('code', { title: `${there.digest || 'no digest file'} · ${kb(there.kb)} · ${there.when || ''}` }, (there.digest || 'no digest').slice(0, 8)) : ''));
+    };
+    const readBtn = (t) => (t.connected ? actionButton(t, 'ds_status', t.datasets ? 'Read again' : 'Read', { title: `Read-only: the processed folders in ${t.paths_all.datasets}` })
+      : pill('off', 'Not connected'));
+    const sendBtn = (t) => {
+      const sel = [...selOf(t)].filter((n) => names.includes(n) && state(t, n) !== 'same');
+      const size = sel.reduce((a, n) => a + (sds.datasets[n].kb || 0), 0);
+      const why = !t.connected ? `Connect ${t.name} first` : !src.connected ? `Connect ${src.name} first` : !sel.length ? 'Nothing selected' : '';
+      return actionButton(t, 'ds_send', sel.length ? `Send ${sel.length} (${kb(size)})` : 'Send', {
+        primary: true, confirm: `Click again: ${sel.length} to ${t.name}`, disabled: !!why, args: { source: src.name, names: sel },
+        title: why || `From ${src.name}: ${sel.join(', ')} (tar | tar through this machine; each folder replaced once its copy is complete; then the digests are checked)` });
+    };
+    const others = targets.map((t) => Object.keys(t.datasets?.datasets || {}).filter((n) => !all.includes(n)).length);
+    box.replaceChildren(
+      h('div', { class: 'rs-head' }, h('h2', {}, 'Datasets'),
+        h('span', { class: 'hint' }, 'The processed folders of your datasets (<name>/processed, its version in digest.sha256), sent from a source to the other servers'),
+        h('span', { class: 'sp' }),
+        h('span', { class: 'sv-all' }, allButton('connect'), allButton('ds_status')), refreshButton()),
+      h('div', { class: 'card sv-card sync-central' }, h('b', {}, 'Source'), pick,
+        src ? h('code', { class: 'sv-path' }, src.paths_all.datasets) : '',
+        src ? (src.connected ? actionButton(src, 'ds_status', sds ? 'Read again' : 'Read its datasets', { title: 'Read-only: digests and sizes' }) : pill('off', 'Not connected')) : '',
+        sds?.when ? h('span', { class: 'hint' }, `read ${sds.when}`) : ''),
+      h('p', { class: 'hint sv-note' }, 'Compared by digest with the source. Send copies the selected processed folders from the source (tar | tar through this machine: the '
+        + 'servers do not reach each other); on the target the copy is written next to the old folder and swapped in once complete, then the digests are checked. '
+        + 'Only processed/ is touched. Each send is an action of the target server, with its commands (">_") and output.'),
+      !src ? h('p', { class: 'empty' }, 'No server.') : !sds ? h('p', { class: 'empty' }, `Read the datasets of ${src.name} first.`)
+        : sds.folder_missing ? h('p', { class: 'db-warn' }, `${sds.folder_missing} does not exist on ${src.name} (Servers > Edit servers > Paths: Datasets folder).`)
+        : h('div', { class: 'card sv-card' }, h('div', { class: 'rs-scroll' }, h('table', { class: 'db-folders sync-table ds-table' },
+          h('thead', {},
+            h('tr', {}, h('th', {}, 'Dataset'), h('th', { class: 'ds-src' }, `${src.name} (source)`), ...targets.map((t) => h('th', {}, t.name, ' ', readBtn(t)))),
+            h('tr', {}, h('th', {}), h('th', { class: 'ds-src hint' }, 'digest · size · date'), ...targets.map((t) => h('th', { class: 'hint' },
+              t.datasets?.folder_missing ? 'No datasets folder yet (created by a send)' : t.datasets ? `read ${t.datasets.when}` : 'not read')))),
+          h('tbody', {}, ...names.map((n) => {
+            const d = sds.datasets[n];
+            return h('tr', {}, h('td', { class: 'ds-name' }, h('div', {}, h('span', {}, n),
+                h('button', { type: 'button', class: 'ds-ign', title: `Leave ${n} out of this list (saved in the settings; it can be shown again below the table)`,
+                  'aria-label': `Ignore ${n}`, onclick: () => setIgnored(n, true) }, 'Ignore'))),
+              h('td', { class: 'ds-src' }, h('code', { title: d.digest || 'no digest file' }, (d.digest || 'no digest').slice(0, 8)), h('span', { class: 'hint' }, ` · ${kb(d.kb)} · ${d.when}`)),
+              ...targets.map((t) => cell(t, n)));
+          })),
+          h('tfoot', {}, h('tr', {}, h('td', {}, h('b', {}, 'Send')), h('td', { class: 'ds-src hint' }, `${names.length} datasets`),
+            ...targets.map((t, i) => h('td', { class: 'ds-cell' }, t.datasets ? sendBtn(t) : '', others[i] ? h('div', { class: 'hint' }, `+ ${others[i]} not on the source`) : ''))))))),
+      hidden.length ? h('div', { class: 'ds-ignored' }, h('span', { class: 'ds-ignored-k' }, `Ignored (${hidden.length})`),
+        ...hidden.map((n) => h('span', { class: 'ds-chip' }, n,
+          h('button', { type: 'button', title: `List ${n} again`, 'aria-label': `Show ${n} again`, onclick: () => setIgnored(n, false) }, '↺')))) : '',
+      h('details', { class: 'card sv-card' }, h('summary', {}, h('b', {}, 'Dataset actions'), h('span', { class: 'hint' }, '  with their commands and output')),
+        h('div', { class: 'rs-scroll' }, logTable('ds'))));
+  }
+
               h('button', { type: 'button', class: 'sv-btn', disabled: i === rows.length - 1 ? '' : null, 'aria-label': `Move ${s.name} down`, onclick: () => move(i + 1) }, '↓')),
             inp('name', 'name', '9em'), inp('host', 'Host or address', '14em'), inp('port', '22', '4.5em'), inp('user', 'user', '8em'),
             h('label', { class: 'sve-flag', title: 'Where the synchronised data lives (one server)' }, central, 'central'),
@@ -559,7 +651,7 @@
   /* ---------- the tabs ---------- */
 
   $('main').append(h('section', { id: 'serverstab', 'aria-label': 'Servers' }), h('section', { id: 'databasestab', 'aria-label': 'Databases' }),
-    h('section', { id: 'synctab', 'aria-label': 'Sync' }));
+    h('section', { id: 'synctab', 'aria-label': 'Sync' }), h('section', { id: 'datasetstab', 'aria-label': 'Datasets' }));
   window.XPServers = {
     show(tab = 'servers') { S.tab = tab; if (!S.data) load(); else paint(); },
     hide() { S.tab = null; },

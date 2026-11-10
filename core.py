@@ -16,6 +16,7 @@ Model
               appended to `path`.
 """
 import copy
+import getpass
 import os
 import posixpath
 import re
@@ -66,7 +67,8 @@ PROJECT_DEFAULTS = {"root": ".", "scripts_dir": "scripts", "src_dir": "src",
                     "env_prefix": "APP_", "env_sep": "__", "config_var": "CONFIG", "commit_var": "COMMIT",
                     "tracking_uri": "sqlite:///mlflow.db",     # MLflow tracking URI (sqlite:///..., postgresql://..., http://...)
                     "mlflow_image": "",     # image of the launcher's MLflow server (empty: IMAGE_NAME; local: no container)
-                    "snapshot": ""}         # what start.sh copies of the project for the container (empty: all but .gitignore'd)
+                    "snapshot": "",         # what start.sh copies of the project for the container (empty: all but .gitignore'd)
+                    "datasets_ignore": ""}  # datasets left out of the Datasets tab (names, space-separated)
 
 HEADER_COMMENT = """\
 # Athanor configuration (version 3). The page edits this file; the previous version is kept
@@ -104,7 +106,8 @@ def _text(v):
 
 # Where things are on a server. Defaults from one base folder; each can be changed per server (Settings > Servers).
 PATH_KEYS = ("base", "db_pattern", "psql_sock", "pg_port", "artifacts", "checkpoints", "launcher",
-             "synchronised", "sync_sock", "sync_port", "scripts", "empty_db", "db_image", "ui_port", "sync_ui_port")
+             "synchronised", "sync_sock", "sync_port", "scripts", "empty_db", "db_image", "ui_port", "sync_ui_port",
+             "datasets")
 DEFAULT_BASE = "/data/experiments"
 
 
@@ -120,7 +123,8 @@ def server_paths(sv):
            "pg_port": "5555", "artifacts": f"{base}/artifacts", "checkpoints": f"{base}/checkpoints",
            "launcher": f"{base}/launcher", "synchronised": sync, "sync_sock": f"{sync}/psql_sock", "sync_port": "5556",
            "scripts": f"{base}/scripts", "empty_db": f"{base}/_empty_db", "db_image": "", "ui_port": "5923",
-           "sync_ui_port": "5924"}
+           "sync_ui_port": "5924",
+           "datasets": f"/data/{sv.get('user') or getpass.getuser()}/datasets"}       # <name>/processed (Datasets tab)
     out.update({k: v for k, v in over.items() if v})
     out.update({"repo": f"{out['launcher']}/repo", "launches": f"{out['launcher']}/launches", "queue": f"{out['launcher']}/queue",
                 "sync_db_pattern": f"{out['synchronised']}/db_*", "sync_artifacts": f"{out['synchronised']}/artifacts",
