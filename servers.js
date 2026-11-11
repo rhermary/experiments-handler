@@ -25,6 +25,16 @@
   const STALE = 'Socket file left but nothing answers on it: Postgres was killed (e.g. its container stopped without a clean shutdown). Starting removes it.';
   const pgPill = (state) => state === 'running' ? pill('ok', 'Running') : state === 'stale' ? pill('warn', 'Stopped (stale socket)', STALE) : pill('bad', 'Stopped');
   const pill = (cls, text, title) => h('span', { class: 'sv-pill ' + cls, title: title || null }, text);
+  /* the MLflow UI of a server's database (own | sync): served by its container on the port of Servers > paths, when
+     the container runs; else '' */
+  const uiLink = (sv, which, label) => {
+    const db = sv.db?.[which];
+    if (!db?.container) return '';
+    const port = which === 'own' ? sv.paths_all.ui_port : sv.paths_all.sync_ui_port;
+    const url = `http://${sv.host}:${port}/`;
+    return h('a', { class: 'db-ui', href: url, target: '_blank', rel: 'noopener', title: `The MLflow UI of the ${which === 'own' ? 'own' : 'synchronised'} database of ${sv.name} (${url})` },
+      label || `${sv.host}:${port}`, ' ↗');
+  };
   const base = (p) => String(p || '').split('/').pop();
   const listed = () => S.data?.servers || [];
 
@@ -286,7 +296,7 @@
         h('dt', {}, 'Container'), h('dd', {}, c ? h('span', {}, h('code', {}, c.id), ` ${c.name} · ${c.image} · started ${c.started}`,
           h('span', { class: 'hint' }, ` · by ${c.by}${c.allow_modif ? ' · changes allowed in the MLflow UI' : ''}`))
           : h('span', { class: 'hint' }, 'None of yours running')),
-        ...(c ? [h('dt', {}, 'MLflow UI'), h('dd', {}, h('code', {}, `${sv.host}:${which === 'own' ? p.ui_port : p.sync_ui_port}`))] : [])),
+        ...(c ? [h('dt', {}, 'MLflow UI'), h('dd', {}, uiLink(sv, which))] : [])),
       folders.length ? h('div', { class: 'rs-scroll' }, h('table', { class: 'db-folders' },
         h('thead', {}, h('tr', {}, ...['', 'Folder', 'Date', 'Size', ''].map((t) => h('th', {}, t)))), h('tbody', {}, ...rows)))
         : h('p', { class: 'hint' }, `No folder matches ${which === 'own' ? p.db_pattern : p.sync_db_pattern}`),
@@ -445,7 +455,7 @@
     const cdb = central?.db?.sync;
     const notReady = syncReady(sv, central);
     const head = h('div', { class: 'db-top' }, h('b', { class: 'db-name' }, sv.name), sv.connected ? pill('ok', 'Connected') : pill('off', 'Not connected'),
-      h('span', { class: 'hint' }, 'Own database'), own ? pgPill(own.state) : h('span', { class: 'hint' }, '? (read the databases)'),
+      h('span', { class: 'hint' }, 'Own database'), own ? pgPill(own.state) : h('span', { class: 'hint' }, '? (read the databases)'), uiLink(sv, 'own', 'MLflow UI'),
       h('span', { class: 'sp' }),
       actionButton(sv, 'sync_preview', pv ? 'Preview again' : 'Preview', { disabled: !!notReady, title: notReady || 'Read-only: what a sync would copy (runs, files, sizes)' }));
     const parts = [head];
@@ -518,7 +528,7 @@
         h('span', { class: 'sp' }),
         h('span', { class: 'sv-all' }, allButton('connect'), readAllSyncButton(central)), refreshButton()),
       central ? h('div', { class: 'card sv-card sync-central' },
-        h('b', {}, `Into ${central.name}`), cdb ? pgPill(cdb.state) : h('span', { class: 'hint' }, '? (read the databases)'),
+        h('b', {}, `Into ${central.name}`), cdb ? pgPill(cdb.state) : h('span', { class: 'hint' }, '? (read the databases)'), uiLink(central, 'sync', 'MLflow UI'),
         h('code', { class: 'sv-path' }, cdb?.data_directory || cdb?.container?.folder || central.paths_all.sync_db_pattern),
         h('span', { class: 'hint' }, `files: ${central.paths_all.sync_artifacts}, ${central.paths_all.sync_checkpoints}`)) : '',
       h('p', { class: 'hint sv-note' }, 'Two syncs, each when you click. Results: the runs (rows, through the two Postgres sockets tunnelled here with ssh -O forward) '

@@ -987,3 +987,5 @@ header #reload { padding: 5px 12px; font-size: 13px; border-radius: 8px; }
 .j-past-item.failed { border-color: var(--err); }
 .j-past-item.is-hidden { opacity: .55; }
 .j-past-place > .pk-head h4 { margin: 0; }
+.db-ui { display: inline-flex; align-items: center; gap: 2px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--accent); font-size: 12px; text-decoration: none; white-space: nowrap; }
+.db-ui:hover { border-color: var(--accent); background: var(--sel); }
