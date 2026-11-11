@@ -348,6 +348,8 @@ def auto_dimensions(cfg, sel, links=(), id_cols=(), df=None):
     sigs = signatures(cfg, sel)
     out, names = [], set()
     for b in xp["blocks"]:
+        if b.get("kind") == "fixed":                          # All Runs: the same for every run, not a dimension
+            continue
         rows = [r for r in b["rows"] if not r.get("loop_all")]   # "all (N)" of a list: not a value a run can have
         values = _exclusive([{"label": r["name"], "rule": rule_of(sigs[b["id"]][r["name"]], others=[sigs[b["id"]][o["name"]] for o in rows if o is not r])}
                              for r in rows], sigs[b["id"]])
@@ -440,6 +442,9 @@ def report_config(cfg, sel, dimensions=None, fresh=False):
     found, id_cols = detect_links(raw) if len(raw) else ([], set())
     links = top["links"] if "links" in top else found
     dims = dimensions if dimensions is not None else top.get("dimensions")
+    fixed = {b["id"] for b in xp["blocks"] if b.get("kind") == "fixed"}
+    if dims:                                                  # a dimension on the fixed block tells no run apart
+        dims = [d for d in dims if d.get("block") not in fixed]
     if dims is None or not dims:
         dims = auto_dimensions(cfg, sel, links, id_cols, _runs_df({**base, "links": links}) if links else None)
     names = [d["name"] for d in dims]
