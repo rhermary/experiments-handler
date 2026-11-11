@@ -441,7 +441,10 @@ def summary(runs, order, cfg):
 # --------------------------------------------------------------------------- LaTeX table
 
 _TEX = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}",
-        "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
+        "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+        # not text characters in LaTeX's default font encoding (OT1: > prints as an inverted question mark): math
+        "<": r"$<$", ">": r"$>$", "|": r"$|$", "≥": r"$\geq$", "≤": r"$\leq$", "±": r"$\pm$", "×": r"$\times$",
+        "→": r"$\rightarrow$", "←": r"$\leftarrow$"}
 
 
 def tex(text):

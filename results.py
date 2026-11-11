@@ -164,8 +164,7 @@ def experiment_of(cfg, sel):
 # --------------------------------------------------------------------------- LaTeX
 
 PREAMBLE = r"""\documentclass[border=4pt,varwidth=40cm]{standalone}
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
+\IfFileExists{lmodern.sty}{\usepackage[T1]{fontenc}\usepackage{lmodern}}{}
 \usepackage{booktabs}
 \usepackage{multirow}
 \usepackage{amsmath}
@@ -173,10 +172,20 @@ PREAMBLE = r"""\documentclass[border=4pt,varwidth=40cm]{standalone}
 """
 
 
+def _png_svg(png):
+    """An SVG showing a PNG rendered at twice the screen density (dvipng -D 192): sharp on high-density screens."""
+    import base64                                           # pylint: disable=import-outside-toplevel
+    import struct                                           # pylint: disable=import-outside-toplevel
+    w, h = struct.unpack(">II", png[16:24])                 # the IHDR chunk
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w / 2:g}" height="{h / 2:g}" viewBox="0 0 {w} {h}">'
+            f'<image width="{w}" height="{h}" href="data:image/png;base64,{base64.b64encode(png).decode()}"/></svg>')
+
+
 def render_latex(body):
-    """SVG of a LaTeX fragment (a tabular), compiled with latex + dvisvgm (glyphs as paths, no shell escape)."""
-    if not shutil.which("latex") or not shutil.which("dvisvgm"):
-        raise ValueError("latex and dvisvgm are needed to render the table")
+    """SVG of a LaTeX fragment (a tabular), compiled with latex (no shell escape), then dvisvgm (glyphs as paths), or
+    dvipng when dvisvgm is not installed (e.g. the project's image: an image in an SVG)."""
+    if not shutil.which("latex") or not (shutil.which("dvisvgm") or shutil.which("dvipng")):
+        raise ValueError("latex, and dvisvgm or dvipng, are needed to render the table (the LaTeX text is still here: Copy LaTeX)")
     with tempfile.TemporaryDirectory(prefix="xp-latex-") as tmp:
         tex = os.path.join(tmp, "t.tex")
         with open(tex, "w", encoding="utf8") as f:
@@ -186,6 +195,13 @@ def render_latex(body):
         if r.returncode != 0:
             err = [ln for ln in r.stdout.splitlines() if ln.startswith("!") or ln.startswith("l.")]
             raise ValueError("LaTeX error: " + (" ".join(err[:4]) or r.stdout[-400:]))
+        if not shutil.which("dvisvgm"):
+            r = subprocess.run(["dvipng", "-T", "tight", "-D", "192", "-bg", "Transparent", "-o", "t.png", "t.dvi"],
+                               cwd=tmp, capture_output=True, text=True, timeout=30, check=False)
+            if r.returncode != 0 or not os.path.exists(os.path.join(tmp, "t.png")):
+                raise ValueError("dvipng: " + (r.stderr or r.stdout)[-300:])
+            with open(os.path.join(tmp, "t.png"), "rb") as f:
+                return _png_svg(f.read())
         r = subprocess.run(["dvisvgm", "--no-fonts", "--exact-bbox", "-o", "t.svg", "t.dvi"],
                            cwd=tmp, capture_output=True, text=True, timeout=30, check=False)
         if r.returncode != 0:

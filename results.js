@@ -773,7 +773,7 @@
     else if (e.error) kids.push(h('pre', { class: 'dlg-err' }, e.error));
     else if (what === 'table') {
       const box = h('div', { class: 'rs-render zoomable', role: 'img', 'aria-label': 'Table made by the script, compiled by LaTeX', title: 'Click to see it large' });
-      box.innerHTML = e.res.tex_svg;                 // SVG made by dvisvgm on this server
+      box.innerHTML = e.res.tex_svg;                 // SVG made on this server (dvisvgm, or a dvipng image in an SVG)
       box.addEventListener('click', () => {
         const big = h('div', { class: 'rs-zoom-tex' });
         big.innerHTML = e.res.tex_svg;
