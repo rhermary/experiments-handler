@@ -125,6 +125,12 @@ dialog::backdrop { background: rgba(0, 0, 0, .4); }
 
 /* dialog: wide variant, option rows */
 dialog { max-height: 92vh; overflow: auto; }
+/* in a window, a long line scrolls inside its own block (code, output), not the window: the blocks may shrink to the
+   window's width (a grid or flex item is otherwise at least as wide as its content) */
+dialog :where(div, section, details, li, ol, ul, form, dd, dt, figure, label) { min-width: 0; }
+dialog pre { max-width: 100%; overflow-x: auto; }
+/* the one-column grids of the windows: their column is the window's width, not the longest line inside */
+dialog :where(.sv-wrap, .sv-step, .q-wrap, .q-list, .q-item, .j-place, .j-past-place, .ch, .ch-list) { grid-template-columns: minmax(0, 1fr); }
 dialog.wide { width: min(820px, 94vw); }
 .dfield > label { display: grid; gap: 4px; }
 .dlg-note, .dlg-hint { margin: 0; font-size: 12px; color: var(--mute); }
@@ -158,6 +164,9 @@ header { flex-wrap: wrap; }
 dialog.picker { width: min(1000px, 96vw); }
 #pk { display: grid; gap: 12px; padding: 16px 20px; }
 .pk-head { display: flex; align-items: center; gap: 8px; }
+/* the spacer of a row of title and buttons: the buttons go to the right (every header, bar and dialog) */
+.sp { flex: 1 1 auto; }
+.pk-head { flex-wrap: wrap; }
 .pk-head h3 { flex: 0 0 auto; }
 .pk-head .pk-src { flex: 1; min-width: 0; margin: 0 0 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pk-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
