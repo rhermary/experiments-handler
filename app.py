@@ -354,9 +354,9 @@ def api_report_run():
         what = str(body.get("what") or "")
         if what not in ("table", "plot", "preview") and not re.fullmatch(r"view:[a-z0-9_]+", what):
             raise ValueError("what: table, plot, preview or view:<id>")
-        conf = results.report_preview(core.load(), body["sel"])["config"]
+        conf = results.report_preview(core.load(), body["sel"], fresh=bool(body.get("fresh")))["config"]
         text = results.script_text(conf)
-        return jsonify(script=text, **results.run_script(text, what))
+        return jsonify(script=text, **results.run_script(text, what, data_key=results.runs_fingerprint(conf)))
     return _report_errors(run)
 
 

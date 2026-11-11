@@ -617,12 +617,24 @@ def script_text(conf):
 _OUTPUTS = {}
 
 
-def run_script(text, what, timeout=300):
-    """Run the report script (written by script_text) for `what` (table | plot | preview); its outputs."""
+def runs_fingerprint(conf):
+    """A digest of the runs the report script reads (ids, status, end time, metrics): its outputs are reused only while
+    it does not change (the script's text is the same when runs are added or finish)."""
+    import hashlib                                          # pylint: disable=import-outside-toplevel
+    df = _runs_df(conf)
+    if not len(df):
+        return "no runs"
+    cols = [c for c in ("run_id", "status", "end_time") if c in df.columns] + sorted(c for c in df.columns if c.startswith("metrics."))
+    return hashlib.sha256(df[cols].sort_values("run_id").to_csv(index=False).encode()).hexdigest()
+
+
+def run_script(text, what, timeout=300, data_key=""):
+    """Run the report script (written by script_text) for `what` (table | plot | preview); its outputs, reused for the
+    same script, output and data_key (runs_fingerprint: the runs it reads)."""
     import base64                                           # pylint: disable=import-outside-toplevel
     import hashlib                                          # pylint: disable=import-outside-toplevel
     import sys                                              # pylint: disable=import-outside-toplevel
-    key = (hashlib.sha256(text.encode()).hexdigest(), what)
+    key = (hashlib.sha256(text.encode()).hexdigest(), what, data_key)
     if key in _OUTPUTS:
         return _OUTPUTS[key]
     flags = {"table": ["--table"], "plot": ["--plot"], "preview": ["--plot", "--preview"]}.get(what) \
