@@ -115,6 +115,8 @@ def candidates_of(idx, members):
 def describe(idx, desc, value, base_value, path):
     """The Level of a node of declared type `desc` whose value in the config is `value`."""
     prim, _, members = primary(desc)
+    if prim["k"] == "type":                                   # Type[X]: the class itself, never instantiated (no init args)
+        return Level("classref", [], None, None, path, value if isinstance(value, str) else None)
     has_class = isinstance(value, dict) and "class_path" in value
     if prim["k"] == "group" and not has_class:
         groups = [m for m in members if m["k"] == "group"]
