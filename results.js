@@ -270,6 +270,12 @@
 
   /* ---------- views (more figures): training curves ---------- */
 
+  /* the runs shown everywhere: the selection's, without the values left out with the chips of Values kept (as the
+     table, the plot and the curves views have them: report_template.summary / curve_data) */
+  const keptRuns = () => {
+    const hide = Object.entries(lay().hide || {}).map(([d, v]) => [d, new Set(v)]).filter(([, v]) => v.size);
+    return R.data.runs.filter((r) => hide.every(([d, v]) => !v.has(r.labels[d])));
+  };
   const curView = () => (R.view.startsWith('v:') ? conf().views.find((v) => 'v:' + v.id === R.view) : null);
   const metricsOf = (source) => (source ? (R.data.link_metrics || {})[source] || [] : R.data.available_metrics || []);
 
@@ -445,7 +451,7 @@
     const dims = conf().dimensions, D = R.data;
     const others = dims.filter((d) => d.name !== v.group);
     const rank = (d, x) => { const i = (D.order[d.name] || []).indexOf(x); return i < 0 ? 1e9 : i; };
-    const runs = [...D.runs].sort((a, b) => {
+    const runs = [...keptRuns()].sort((a, b) => {
       for (const d of [...dims.filter((x) => x.name === v.group), ...others]) { const x = rank(d, a.labels[d.name]) - rank(d, b.labels[d.name]); if (x) return x; }
       return 0;
     });
@@ -872,10 +878,33 @@
   /* ---------- runs ---------- */
 
   let runsShow = 'all';                         // all | unmatched | repeated | excluded
+  /* the folded headings of the Runs view, per XP and selection, kept in this browser */
+  let foldOf = null, foldKeys = null;
+  const foldKey = () => `xp-runs-fold:${st.xp}:${R.data?.config?.selection || ''}`;
+  function foldSet() {
+    if (foldOf !== foldKey()) {
+      foldOf = foldKey();
+      try { foldKeys = new Set(JSON.parse(localStorage.getItem(foldOf) || '[]')); } catch (e) { foldKeys = new Set(); }
+    }
+    return foldKeys;
+  }
+  function saveFold() { try { localStorage.setItem(foldOf, JSON.stringify([...foldKeys])); } catch (e) { /* storage unavailable */ } }
 
   function runsView() {
     const D = R.data, dims = conf().dimensions, M = metricList();
-    const keyOf = (r) => dims.map((d) => r.labels[d.name]).join('\u0000');
+    const runs = keptRuns(), leftOut = D.runs.length - runs.length;     // without the values left out (Values kept)
+    // the groups follow the arrangement of the table (panels, columns, rows); the other dimensions tell the runs of a
+    // group apart (shown on each run). No arrangement: every dimension groups
+    const L = lay();
+    const arranged = [L.panel, L.column, ...(L.rows || [])].filter(Boolean)
+      .map((n) => dims.find((d) => d.name === n)).filter((d, i, a) => d && a.indexOf(d) === i);
+    const gdims = arranged.length ? arranged : dims;
+    // super groups: one per panel value, inside it one per column value; the groups (of the rows) inside them
+    const pdim = arranged.find((d) => d.name === L.panel), cdim = arranged.find((d) => d.name === L.column);
+    const rdims = gdims.filter((d) => d !== pdim && d !== cdim);
+    const rest = dims.filter((d) => !gdims.includes(d));
+    const fullKey = (r) => dims.map((d) => r.labels[d.name]).join('\u0000');
+    const keyOf = (r) => gdims.map((d) => r.labels[d.name]).join('\u0000');
     const groupsOf = (list) => {
       const out = new Map();
       for (const r of list) {
@@ -888,34 +917,39 @@
     const excluded = D.excluded || [];
     if (runsShow === 'excluded' && !excluded.length) runsShow = 'all';
     const groups = new Map();
-    for (const r of D.runs) {
+    for (const r of runs) {
       const k = keyOf(r);
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(r);
     }
     const rank = (d, v) => { const i = (D.order[d.name] || []).indexOf(v); return i < 0 ? 1e9 : i; };
+    const byRest = (a, b) => { for (const d of rest) { const x = rank(d, a.labels[d.name]) - rank(d, b.labels[d.name]); if (x) return x; } return 0; };
     const sorted = [...groups.entries()].sort(([, a], [, b]) => {
-      for (const d of dims) { const x = rank(d, a[0].labels[d.name]) - rank(d, b[0].labels[d.name]); if (x) return x; }
+      for (const d of gdims) { const x = rank(d, a[0].labels[d.name]) - rank(d, b[0].labels[d.name]); if (x) return x; }
       return 0;
-    });
-    const unmatched = D.runs.filter((r) => dims.some((d) => r.labels[d.name] === OTHER));
-    const byDim = dims.map((d) => [d.name, D.runs.filter((r) => r.labels[d.name] === OTHER).length]).filter(([, n]) => n);
-    const repeated = sorted.filter(([, rs]) => rs.length > 1);
-    const most = Math.max(0, ...sorted.map(([, rs]) => rs.length));
+    }).map(([k, rs]) => [k, [...rs].sort(byRest)]);
+    const unmatched = runs.filter((r) => dims.some((d) => r.labels[d.name] === OTHER));
+    const byDim = dims.map((d) => [d.name, runs.filter((r) => r.labels[d.name] === OTHER).length]).filter(([, n]) => n);
+    // repeated: several runs with the very same values on every dimension
+    const sameCount = new Map();
+    for (const r of runs) sameCount.set(fullKey(r), (sameCount.get(fullKey(r)) || 0) + 1);
+    const isRepeated = (r) => sameCount.get(fullKey(r)) > 1;
+    const repeated = [...sameCount.values()].filter((n) => n > 1);
+    const most = Math.max(0, ...sameCount.values());
     const stat = (key, value, label, sub, tone = '') => h('button', { type: 'button', class: `rs-stat ${tone}`, 'aria-pressed': String(runsShow === key),
       onclick: () => { runsShow = runsShow === key ? 'all' : key; paint(); } }, h('b', {}, String(value)), h('span', {}, label), sub ? h('small', {}, sub) : '');
     const filter = (conf().filter || '').trim();
     const stats = h('div', { class: 'rs-stats' },
-      stat('all', D.runs.length, 'runs', 'From the filter'),
       stat('excluded', excluded.length, 'filtered out', D.excluded_error ? `Could not list them: ${D.excluded_error}`
         : filter ? `Runs of the experiment the filter leaves out (${filter})` : 'No filter: every run of the experiment is used', excluded.length ? 'info' : 'ok'),
       stat('unmatched', unmatched.length, 'unmatched', byDim.map(([n, k]) => `${n}: ${k}`).join(', ') || 'Every run has a value everywhere', unmatched.length ? 'warn' : 'ok'),
-      stat('all', sorted.length, 'configurations', 'Distinct combinations of the dimensions'),
+      stat('all', sorted.length, arranged.length ? 'groups' : 'configurations', arranged.length
+        ? `${runs.length} runs, by ${gdims.map((d) => d.name).join(' · ')} (the arrangement of the table)` : `${runs.length} runs: distinct combinations of the dimensions`),
       stat('repeated', repeated.length, 'repeated', repeated.length ? `Up to ${most} runs for one configuration` : 'One run per configuration', repeated.length ? 'info' : 'ok'));
     const sortGroups = (m) => [...m.entries()].sort(([, a], [, b]) => {
-      for (const d of dims) { const x = rank(d, a[0].labels[d.name]) - rank(d, b[0].labels[d.name]); if (x) return x; }
+      for (const d of gdims) { const x = rank(d, a[0].labels[d.name]) - rank(d, b[0].labels[d.name]); if (x) return x; }
       return 0;
-    });
+    }).map(([k, rs]) => [k, [...rs].sort(byRest)]);
     // filtered out: grouped by reason (the conditions of the filter a run fails, and its values there), then configuration
     const whyKey = (r) => (r.why || []).map((w) => `${w.cond}\u0001${w.got}`).join('\u0002');
     const reasons = new Map();
@@ -930,36 +964,81 @@
     const reasonList = runsShow === 'excluded' ? h('div', { class: 'rs-reasons' }, h('span', { class: 'rs-key' }, 'Why'),
       ...[...reasons.values()].sort((x, y) => y.length - x.length).map((rs) => h('span', { class: 'rs-reason' },
         h('b', {}, String(rs.length)), ' ', ...(rs[0].why || []).flatMap((w, i) => [i ? ' and ' : '', h('code', {}, w.cond), ` (${w.got === 'not set' ? 'not set' : 'is ' + w.got})`])))) : '';
-    const shown = runsShow === 'excluded' ? byReason() : sorted.filter(([, rs]) => runsShow === 'all' || (runsShow === 'repeated' ? rs.length > 1 : rs.some((r) => dims.some((d) => r.labels[d.name] === OTHER))));
+    const keep = (r) => runsShow === 'all' || (runsShow === 'repeated' ? isRepeated(r) : dims.some((d) => r.labels[d.name] === OTHER));
+    const shown = runsShow === 'excluded' ? byReason() : sorted.map(([k, rs]) => [k, rs.filter(keep)]).filter(([, rs]) => rs.length);
+    const lab = (r, d) => h('span', { class: 'rs-lab' + (r.labels[d.name] === OTHER ? ' other' : ''), title: d.name },
+      r.labels[d.name] === OTHER ? `${d.name}: no value` : r.labels[d.name]);
     const status = (x) => h('span', { class: 'rs-status ' + String(x || '').toLowerCase() }, x || '?');
     const body = [];
-    for (const [, rs] of shown) {
+    const cols = String(6 + M.length);
+    const supers = runsShow === 'excluded' ? [] : [pdim, cdim].filter(Boolean);
+    const depth = supers.length;                         // how deep the groups and runs are nested
+    // runs of the groups shown that share the values of `first` on the super groups up to `level`
+    const runsUnder = (first, level) => shown.filter(([, rs]) => supers.slice(0, level + 1).every((x) => rs[0].labels[x.name] === first.labels[x.name]))
+      .reduce((a, [, rs]) => a + rs.length, 0);
+    // folded headings (panels, columns, groups), per XP, kept in the browser
+    const fold = foldSet();
+    const pathOf = (first, level) => supers.slice(0, level + 1).map((x) => `${x.name}=${first.labels[x.name]}`).join('\u0001');
+    const toggle = (key) => () => { if (fold.has(key)) fold.delete(key); else fold.add(key); saveFold(); paint(); };
+    const chevron = (key) => h('span', { class: 'rs-chev', 'aria-hidden': 'true' }, fold.has(key) ? '▸' : '▾');
+    const headCell = (key, label, ...kids) => h('td', { colspan: cols },
+      h('button', { type: 'button', class: 'rs-fold', 'aria-expanded': String(!fold.has(key)), title: fold.has(key) ? `Show ${label}` : `Fold ${label}`, onclick: toggle(key) },
+        chevron(key), ...kids));
+    let prev = null;                                     // the first run of the previous group
+    for (const [gk, rs] of shown) {
       const first = rs[0];
-      if (body.length) body.push(h('tr', { class: 'rs-gap', 'aria-hidden': 'true' }, h('td', { colspan: String(6 + M.length) })));
+      // the first level whose value changed: its header and the ones below it
+      const changed = supers.findIndex((x, k) => !prev || supers.slice(0, k + 1).some((y) => prev.labels[y.name] !== first.labels[y.name]));
+      if (changed >= 0) {
+        supers.slice(changed).forEach((d, k) => {
+          const level = changed + k, v = first.labels[d.name], n = runsUnder(first, level), key = pathOf(first, level);
+          if (supers.slice(0, level).some((_, up) => fold.has(pathOf(first, up)))) return;   // inside a folded panel
+          if (body.length && level === 0) body.push(h('tr', { class: 'rs-gap', 'aria-hidden': 'true' }, h('td', { colspan: cols })));
+          body.push(h('tr', { class: `rs-super l${level}` + (fold.has(key) ? ' folded' : '') }, headCell(key, `${d.name} ${v}`,
+            h('small', {}, level ? 'Column' : 'Panel', ' · ', d.name), ' ', h('b', {}, v === OTHER ? 'no value' : String(v)),
+            h('span', { class: 'rs-count-badge' }, `${n} run${n === 1 ? '' : 's'}`))));
+        });
+      }
+      prev = first;
+      if (supers.some((_, level) => fold.has(pathOf(first, level)))) continue;   // its panel or column is folded
+      const gkey = (depth ? pathOf(first, depth - 1) + '\u0002' : '') + gk;
       if (runsShow === 'excluded') {
-        body.push(h('tr', { class: 'rs-group out' }, h('td', { colspan: String(6 + M.length) }, whyChips(first),
+        if (body.length) body.push(h('tr', { class: 'rs-gap', 'aria-hidden': 'true' }, h('td', { colspan: cols })));
+        body.push(h('tr', { class: 'rs-group out' + (fold.has(gkey) ? ' folded' : '') }, headCell(gkey, 'these runs', whyChips(first),
           h('span', { class: 'rs-count-badge' + (rs.length > 1 ? ' many' : '') }, rs.length > 1 ? `${rs.length} runs` : '1 run'))));
-      } else body.push(h('tr', { class: 'rs-group' + (rs.length > 1 ? ' rep' : '') },
-        h('td', { colspan: String(6 + M.length) },
-          h('span', { class: 'rs-combo' }, ...dims.map((d) => h('span', { class: 'rs-lab' + (first.labels[d.name] === OTHER ? ' other' : ''), title: d.name },
-            first.labels[d.name] === OTHER ? `${d.name}: no value` : first.labels[d.name]))),
-          h('span', { class: 'rs-count-badge' + (rs.length > 1 ? ' many' : '') }, rs.length > 1 ? `${rs.length} runs` : '1 run'),
-          dims.some((d) => d.block) ? h('button', { type: 'button', class: 'tiny', title: 'Select these options in the Launcher tab', onclick: () => selectInLauncher(first) }, 'Select in Launcher') : '')));
+      } else if (rdims.length || !supers.length) {      // no rows: the headings say it all
+        body.push(h('tr', { class: `rs-group d${depth}` + (rs.length > 1 ? ' rep' : '') + (fold.has(gkey) ? ' folded' : '') },
+          headCell(gkey, (rdims.length ? rdims : gdims).map((d) => first.labels[d.name]).join(' · '),
+            h('span', { class: 'rs-combo' }, ...(rdims.length ? rdims : gdims).map((d) => lab(first, d))),
+            h('span', { class: 'rs-count-badge' + (rs.length > 1 ? ' many' : '') }, rs.length > 1 ? `${rs.length} runs` : '1 run'))));
+      }
+      if (fold.has(gkey)) continue;
       for (const r of rs) {
         const open = () => openMlflow(`#/experiments/${D.experiment_id}/runs/${r.id}`);
         const idChip = h('button', { type: 'button', class: 'rs-id', title: `${r.id}\nclick to copy the run id` }, r.id.slice(0, 8));
         idChip.addEventListener('click', async () => {
           try { await navigator.clipboard.writeText(r.id); idChip.textContent = 'copied'; setTimeout(() => { idChip.textContent = r.id.slice(0, 8); }, 1200); } catch (e) { status(r.id); }
         });
-        body.push(h('tr', {},
-          h('td', { class: 'rs-run-name' }, r.name || '—', runsShow === 'excluded' ? comboLine(r) : ''), h('td', { class: 'rs-id-cell' }, idChip),
+        body.push(h('tr', { class: `rs-runrow d${depth}` },
+          h('td', { class: 'rs-run-name' }, r.name || '—', runsShow === 'excluded' ? comboLine(r)
+            : rest.length ? h('span', { class: 'rs-combo rs-run-rest' }, ...rest.map((d) => lab(r, d))) : '',
+            runsShow !== 'excluded' && dims.some((d) => d.block) ? h('button', { type: 'button', class: 'tiny rs-sel', title: 'Select the options of this run in the Launcher tab', onclick: () => selectInLauncher(r) }, 'Select in Launcher') : ''),
+          h('td', { class: 'rs-id-cell' }, idChip),
           h('td', {}, status(r.status)), h('td', { class: 'mono hint' }, r.start || ''), h('td', { class: 'mono hint' }, r.commit || ''),
           ...M.map((m) => h('td', { class: 'num mono' }, r.metrics[m.key] == null ? '—' : fmt(r.metrics[m.key] * lay().scale))),
           h('td', { class: 'rs-open' }, h('a', { class: 'tiny btnlink', href: window.XPRouter?.href({ tab: 'mlflow', mlflow: `/experiments/${D.experiment_id}/runs/${r.id}` }) || '#',
             title: 'Open this run in the MLflow tab (middle click: in a new tab)', onclick: (ev) => { if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button) return; ev.preventDefault(); open(); } }, 'MLflow ↗'))));
       }
     }
-    return h('div', { class: 'rs-runs-view' }, stats, noRunsPanel(), reasonList,
+    // fold everything: the panels (or columns, or groups: the top level there is)
+    const tops = new Set();
+    for (const [gk, rs] of shown) tops.add(supers.length ? pathOf(rs[0], 0) : gk);
+    const foldBar = runsShow === 'excluded' || !shown.length ? '' : h('div', { class: 'rs-foldbar' },
+      h('button', { type: 'button', class: 'tiny', onclick: () => { tops.forEach((k) => fold.add(k)); saveFold(); paint(); } }, 'Collapse All'),
+      h('button', { type: 'button', class: 'tiny', disabled: fold.size ? null : '', onclick: () => { fold.clear(); saveFold(); paint(); } }, 'Expand All'));
+    const keptNote = leftOut ? h('p', { class: 'hint' }, `${leftOut} run${leftOut === 1 ? '' : 's'} of the filter left out with the chips of Values kept (as in the table and the plot): `,
+      ...Object.entries(lay().hide || {}).filter(([, x]) => x.length).flatMap(([d, x], k) => [k ? '; ' : '', `${d}: ${x.join(', ')}`])) : '';
+    return h('div', { class: 'rs-runs-view' }, stats, keptNote, noRunsPanel(), reasonList, foldBar,
       h('div', { class: 'rs-scroll' }, h('table', { class: 'rs-runlist' },
         h('thead', {}, h('tr', {}, ...['run', 'id', 'status', 'started', 'commit', ...M.map((m) => m.label.replace(/[$\\{}]/g, '')), ''].map((t, i) => h('th', { class: i >= 5 && i < 5 + M.length ? 'num' : '' }, t)))),
         h('tbody', {}, ...(body.length ? body : [h('tr', {}, h('td', { colspan: String(6 + M.length), class: 'hint' }, 'Nothing to show.'))])))));

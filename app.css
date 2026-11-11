@@ -526,7 +526,7 @@ dialog .pk-head button.primary { border-color: var(--accent); }
 .rs-runlist thead th { position: sticky; top: 0; z-index: 1; padding: 8px 10px; background: var(--bg); border-bottom: 1px solid var(--line); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--mute); text-align: left; }
 .rs-runlist th.num, .rs-runlist td.num { text-align: right; }
 .rs-runlist td { padding: 5px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-.rs-runlist tbody tr:not(.rs-group):hover td { background: var(--sel); }
+.rs-runlist tbody tr:not(.rs-group):not(.rs-super):hover td { background: var(--sel); }
 .rs-runlist td.num { font-variant-numeric: tabular-nums; }
 .rs-group td { padding: 10px 10px 6px; background: var(--bg); border-top: 1px solid var(--line); }
 .rs-group.rep td { box-shadow: inset 4px 0 0 var(--accent); }
@@ -589,7 +589,7 @@ dialog.gpudlg { width: min(1300px, 97vw); }
 .rs-runlist tr.rs-gap td { height: 14px; padding: 0; border: 0; background: var(--bg); }
 .rs-runlist tr.rs-group td { padding: 10px 10px 8px; background: var(--sel); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); box-shadow: inset 4px 0 0 var(--accent); }
 .rs-runlist tr.rs-group.rep td { box-shadow: inset 4px 0 0 var(--warn-ink); }
-.rs-runlist tbody tr:not(.rs-group):not(.rs-gap) td:first-child { padding-left: 18px; }
+.rs-runlist tbody tr:not(.rs-group):not(.rs-gap):not(.rs-super):not(.rs-runrow) td:first-child { padding-left: 18px; }
 
 /* large view of a table / figure */
 .zoomable, .rs-fig img { cursor: zoom-in; }
@@ -989,3 +989,29 @@ header #reload { padding: 5px 12px; font-size: 13px; border-radius: 8px; }
 .j-past-place > .pk-head h4 { margin: 0; }
 .db-ui { display: inline-flex; align-items: center; gap: 2px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--accent); font-size: 12px; text-decoration: none; white-space: nowrap; }
 .db-ui:hover { border-color: var(--accent); background: var(--sel); }
+/* Runs view: the values that tell the runs of a group apart, and Select in Launcher (on hover) */
+.rs-runlist .rs-run-rest { margin-left: 8px; }
+.rs-runlist .rs-run-rest .rs-lab { font-size: 11px; }
+.rs-runlist .rs-sel { margin-left: 8px; opacity: 0; transition: opacity .12s; }
+.rs-runlist tr:hover .rs-sel, .rs-runlist .rs-sel:focus-visible { opacity: 1; }
+@media (hover: none) { .rs-runlist .rs-sel { opacity: 1; } }
+/* Runs view: panels > columns > groups > runs, each level set apart, and folded by clicking its heading */
+.rs-runlist .rs-fold { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.rs-runlist .rs-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.rs-runlist .rs-chev { flex: 0 0 auto; width: 14px; color: var(--mute); font-size: 11px; }
+.rs-runlist .rs-fold .rs-count-badge { margin-left: auto; }
+.rs-runlist tr.rs-super td { border-bottom: 0; }
+.rs-runlist tr.rs-super small { color: var(--mute); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.rs-runlist tr.rs-super.l0 td { padding: 12px 12px; background: color-mix(in srgb, var(--accent) 16%, var(--panel)); border-top: 2px solid var(--accent); font-size: 15px; }
+.rs-runlist tr.rs-super.l0 b { font-size: 16px; }
+.rs-runlist tr.rs-super.l1 td { padding: 8px 12px 8px 28px; background: color-mix(in srgb, var(--accent) 7%, var(--panel)); border-top: 1px solid var(--line);
+  box-shadow: inset 16px 0 0 color-mix(in srgb, var(--accent) 16%, var(--panel)), inset 19px 0 0 var(--accent); font-size: 13px; }
+.rs-runlist tr.rs-super.folded td { border-bottom: 1px solid var(--line); }
+/* groups and runs: indented by how many headings they are under */
+.rs-runlist tr.rs-group.d1 td { padding-left: 28px; }
+.rs-runlist tr.rs-group.d2 td { padding-left: 44px; }
+.rs-runlist tr.rs-runrow.d0 td:first-child { padding-left: 30px; }
+.rs-runlist tr.rs-runrow.d1 td:first-child { padding-left: 46px; box-shadow: inset 33px 0 0 var(--panel), inset 34px 0 0 var(--line); }
+.rs-runlist tr.rs-runrow.d2 td:first-child { padding-left: 62px; box-shadow: inset 49px 0 0 var(--panel), inset 50px 0 0 var(--line); }
+.rs-runlist tr.rs-runrow td { font-size: 12.5px; }
+.rs-foldbar { display: flex; justify-content: flex-end; gap: 6px; }
