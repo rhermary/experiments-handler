@@ -35,13 +35,33 @@
     if (dlg?.open) paint();
   }
 
+  /* an output box: shown at its bottom (the newest lines) when read */
+  const reading = new Set();                        // keys being read again (their Refresh button says so)
+  // the tag of an output box: its key encoded (a key holds \u0000, which CSS.escape turns into U+FFFD: no match)
+  const outTag = (k) => encodeURIComponent(k);
+  const outBox = (tag) => dlg?.querySelector(`pre[data-out="${CSS.escape(tag)}"]`);
+  function toBottom(k) {                            // after paint() put back the old positions (its microtask runs first)
+    queueMicrotask(() => {
+      const pre = outBox(outTag(k));
+      if (pre) pre.scrollTop = pre.scrollHeight;
+    });
+  }
+  async function readOut(store, k, fetch, empty) {
+    reading.add(k); paint();
+    try { store[k] = (await fetch()).text || empty; } catch (e) { store[k] = e.message; }
+    reading.delete(k); paint();
+    toBottom(k);
+  }
+  const refreshBtn = (k, fn) => h('button', { type: 'button', class: 'tiny', disabled: reading.has(k) ? '' : null,
+    title: 'Read the output again and go to its end', onclick: fn }, reading.has(k) ? 'Refreshing...' : 'Refresh');
+
+  const pastKey = (p, j) => `${p.server || ''}\u0000${j.name}`;
+  const readPast = (p, j) => readOut(pastOpen, pastKey(p, j), () => api('/api/jobs/past_log', { server: p.server || '', name: j.name }), '(empty)');
   async function showPast(p, j) {
-    const k = `${p.server || ''}\u0000${j.name}`;
+    const k = pastKey(p, j);
     if (pastOpen[k] !== undefined) { delete pastOpen[k]; paint(); return; }
     pastOpen[k] = 'reading...';
-    paint();
-    try { pastOpen[k] = (await api('/api/jobs/past_log', { server: p.server || '', name: j.name })).text || '(empty)'; } catch (e) { pastOpen[k] = e.message; }
-    paint();
+    await readPast(p, j);
   }
 
   /* hide (or show again) kept outputs: only the listing changes, the log files stay */
@@ -66,9 +86,10 @@
         h('span', { class: 'hint' }, `started ${j.started}`),
         h('div', { class: 'q-acts' }, h('button', { type: 'button', class: 'tiny', 'aria-pressed': String(pastOpen[k] !== undefined), onclick: () => showPast(p, j) },
           pastOpen[k] !== undefined ? 'Hide Output' : 'Output'),
+          pastOpen[k] !== undefined ? refreshBtn(k, () => readPast(p, j)) : '',
           h('button', { type: 'button', class: 'tiny', title: j.hidden ? 'List it again in Past Jobs' : 'Seen: stop listing it (the log file is kept)',
             onclick: () => setHidden(p, [j], !j.hidden) }, j.hidden ? 'Unhide' : 'Hide'))),
-      pastOpen[k] !== undefined ? h('pre', { class: 'j-logs' }, pastOpen[k]) : '');
+      pastOpen[k] !== undefined ? h('pre', { class: 'j-logs', 'data-out': outTag(k) }, pastOpen[k]) : '');
   }
 
   function pastPlace(p) {
@@ -99,13 +120,12 @@
       ...places.map(pastPlace));
   }
 
+  const readLogs = (p, j) => readOut(open, keyOf(p, j), () => api('/api/jobs/logs', { server: p.server || '', id: j.id }), '(no output yet)');
   async function showLogs(p, j) {
     const k = keyOf(p, j);
     if (open[k] !== undefined) { delete open[k]; paint(); return; }
     open[k] = 'reading...';
-    paint();
-    try { open[k] = (await api('/api/jobs/logs', { server: p.server || '', id: j.id })).text || '(no output yet)'; } catch (e) { open[k] = e.message; }
-    paint();
+    await readLogs(p, j);
   }
 
   async function stop(p, j) {
@@ -134,20 +154,27 @@
           h('span', { class: 'q-opt' }, h('small', {}, 'Image'), ' ', j.image)),
         h('span', { class: 'hint', title: `Started ${j.started} (UTC)` }, `Running for ${dur(j.age_s)}`),
         h('div', { class: 'q-acts' },
-          h('button', { type: 'button', class: 'tiny', 'aria-pressed': String(open[k] !== undefined), onclick: () => showLogs(p, j) }, open[k] !== undefined ? 'Hide output' : 'Output'),
+          h('button', { type: 'button', class: 'tiny', 'aria-pressed': String(open[k] !== undefined), onclick: () => showLogs(p, j) }, open[k] !== undefined ? 'Hide Output' : 'Output'),
+          open[k] !== undefined ? refreshBtn(k, () => readLogs(p, j)) : '',
           asking[k] ? h('button', { type: 'button', class: 'tiny', onclick: () => { delete asking[k]; paint(); } }, 'Cancel') : '',
           h('button', { type: 'button', class: 'tiny danger', title: 'docker stop: the job gets SIGTERM, then SIGKILL after 30 s', onclick: () => stop(p, j) },
             asking[k] ? 'Confirm stop' : 'Stop'))),
       h('div', { class: 'q-meta hint' }, `${j.id} · started ${j.started} UTC`, j.launch ? ' · launch ' : '', j.launch ? h('code', {}, j.launch) : '',
         j.cmd ? h('span', { class: 'j-cmd', title: j.cmd }, ` · ${j.cmd}`) : ''),
       asking[k] ? h('p', { class: 'q-note' }, 'Stop this job? It runs: ', h('code', {}, asking[k])) : '',
-      open[k] !== undefined ? h('pre', { class: 'j-logs' }, open[k]) : '');
+      open[k] !== undefined ? h('pre', { class: 'j-logs', 'data-out': outTag(k) }, open[k]) : '');
   }
 
   function paint() {
     if (!dlg) return;
+    const kept = new Map([...dlg.querySelectorAll('pre[data-out]')].map((x) => [x.dataset.out,
+      x.scrollTop + x.clientHeight >= x.scrollHeight - 4 ? 'bottom' : x.scrollTop]));
     const places = last?.places || [];
     const n = places.reduce((a, p) => a + p.jobs.length, 0);
+    queueMicrotask(() => kept.forEach((at, tag) => {           // after the new content is in
+      const pre = outBox(tag);
+      if (pre) pre.scrollTop = at === 'bottom' ? pre.scrollHeight : at;
+    }));
     dlg.replaceChildren(h('div', { class: 'q-wrap' },
       h('div', { class: 'pk-head' }, h('h3', { id: 'j-title' }, 'Jobs'),
         h('span', { class: 'hint' }, last ? `${n} running · read at ${last.when || '...'} · every 15 s` : 'reading...'),
