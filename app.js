@@ -120,6 +120,7 @@ async function load() {
   try { cfg = await api('/api/config'); } catch (e) { status(e.message, true); return; }
   syncSelection();
   draw();
+  window.XP_LOADED = true;                            // router.js may load after this (the last script): it checks it
   window.dispatchEvent(new Event('xp-loaded'));       // router.js: apply the address of the page
 }
 

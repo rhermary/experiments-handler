@@ -83,12 +83,16 @@
     later();                                    // the address, cleaned of what did not apply
   }
 
-  window.addEventListener('xp-loaded', () => {
+  function start() {
     if (started) { later(); return; }
     started = true;
     if (location.hash.length > 1) apply();
     else history.replaceState(null, '', text(current()));
-  });
+  }
+  window.addEventListener('xp-loaded', start);
+  // the settings may have arrived before this script was loaded (it is the last one: after a restart of the app the
+  // scripts are downloaded again, and the event was sent before anyone listened)
+  if (window.XP_LOADED) start();
   window.addEventListener('popstate', () => { if (started) apply(); });
   window.addEventListener('xp-state', later);
   // any click or change may show something else; dialogs closed with Esc too
