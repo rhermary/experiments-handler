@@ -21,6 +21,29 @@ import remote
 import remote_launch
 
 OWN_PREFIX = "launcher-"                         # the launcher's own containers: not jobs
+ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\-_]")      # terminal codes: colours, cursor moves
+
+
+def _raw(argv):
+    """The output of a command as it is: bytes decoded by hand (text=True would turn each lone carriage return, the
+    redraws of a progress bar, into a newline before as_terminal sees it)."""
+    r = subprocess.run(argv, capture_output=True, timeout=40, check=False, stdin=subprocess.DEVNULL)
+    return (r.stdout or r.stderr).decode("utf8", errors="replace")
+
+
+def as_terminal(text):
+    """The output as a terminal shows it: a carriage return redraws its line (a progress bar: only its last state is
+    left), colours and cursor codes removed."""
+    out = []
+    lines = ANSI.sub("", text).split("\n")
+    for i, line in enumerate(lines):
+        parts = [x for x in line.split("\r") if x]
+        last = parts[-1] if parts else ""
+        # the line being written (no newline yet): its last redraw may be read half written; the one before is whole
+        if i == len(lines) - 1 and len(parts) > 1 and len(last.rstrip("\ufffd")) < len(parts[-2]):
+            last = parts[-2]
+        out.append(last)
+    return "\n".join(out)
 LOGS_TAIL = 200
 
 
@@ -135,8 +158,7 @@ def logs(cfg, server, cid):
     cmd = f"docker logs --tail {LOGS_TAIL} {cid} 2>&1"
     sv = _target(cfg, server)
     argv = remote.ssh_argv(sv, cmd) if sv else ["bash", "-c", cmd]
-    r = subprocess.run(argv, capture_output=True, text=True, timeout=40, check=False, stdin=subprocess.DEVNULL)
-    return (r.stdout or r.stderr)[-60000:]
+    return as_terminal(_raw(argv))[-60000:]
 
 
 def stop_steps(cfg, server, cid):
@@ -293,5 +315,4 @@ def past_log(cfg, server, name, lines=400):
     cmd = f"tail -n {int(lines)} {shlex.quote(path)} 2>&1"
     sv = _target(cfg, server)
     argv = remote.ssh_argv(sv, cmd) if sv else ["bash", "-c", cmd]
-    r = subprocess.run(argv, capture_output=True, text=True, timeout=40, check=False, stdin=subprocess.DEVNULL)
-    return (r.stdout or r.stderr)[-200000:]
+    return as_terminal(_raw(argv))[-200000:]

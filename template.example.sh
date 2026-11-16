@@ -17,7 +17,8 @@ cd @@WORKDIR@@ || exit 1
 PROCESS_GIT=$([[ $DEBUG -eq 0 ]] && echo "git stash >> /dev/null && git checkout $COMMIT && " || echo "")
 
 # Command run in the container
-CMD="$PROCESS_GIT  @@LOOP@@"
+# a terminal of 200 columns: with docker create -t (no real terminal), it has 0 and progress bars (tqdm) draw nothing
+CMD="stty cols 200 rows 50 2>/dev/null; $PROCESS_GIT  @@LOOP@@"
 
 CONTAINER_ID=$(\
     docker create\
