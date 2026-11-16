@@ -32,8 +32,10 @@
     if (!db?.container) return '';
     const port = which === 'own' ? sv.paths_all.ui_port : sv.paths_all.sync_ui_port;
     const url = `http://${sv.host}:${port}/`;
-    return h('a', { class: 'db-ui', href: url, target: '_blank', rel: 'noopener', title: `The MLflow UI of the ${which === 'own' ? 'own' : 'synchronised'} database of ${sv.name} (${url})` },
-      label || `${sv.host}:${port}`, ' ↗');
+    const mode = db.container.allow_modif ? 'changes allowed' : 'read-only';
+    return h('a', { class: 'db-ui' + (db.container.allow_modif ? ' modif' : ''), href: url, target: '_blank', rel: 'noopener',
+      title: `The MLflow UI of the ${which === 'own' ? 'own' : 'synchronised'} database of ${sv.name} (${url}): ${mode}` },
+      label ? `${label} (${mode})` : `${sv.host}:${port}`, ' ↗');
   };
   const base = (p) => String(p || '').split('/').pop();
   const listed = () => S.data?.servers || [];
@@ -64,6 +66,10 @@
         { label: 'Commands and output', fn: () => commandsDialog(r.result.title, r.steps, r.result.id) });
       if (!r.result.ok || ['db_scripts', 'db_start', 'db_new', 'sync_run', 'sync_ckpt', 'ds_send'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
       if (action === 'ds_send') await run(server, 'ds_status', {}, null, true);          // what it has now
+      if (['db_start', 'db_stop', 'db_new', 'db_pull'].includes(action)) {      // the databases (and images) as they are now
+        if (action === 'db_start' && r.result.ok) await new Promise((ok) => setTimeout(ok, 3000));   // Postgres needs a moment to answer
+        await run(server, 'db_status', {}, null, true);
+      }
     } catch (e) {
       if (quiet) { delete S.busy[server + action]; return false; }
       status(e.message, true);
@@ -285,16 +291,29 @@
         h('td', { class: 'num' }, sizes[f] != null ? `${(sizes[f] / 1024).toFixed(1)} GB` : h('span', { class: 'hint' }, '-')),
         h('td', {}, f === inUse ? pill('ok', 'In use') : ''));
     });
+    // Allow changes: remembered in this browser per server and database; else the mode of the running container
+    const modifKey = `xp-db-modif:${sv.name}:${which}`;
+    if (S.modif[key] === undefined) {
+      let saved = null;
+      try { saved = localStorage.getItem(modifKey); } catch (e) { /* storage unavailable */ }
+      S.modif[key] = saved !== null ? saved === '1' : !!c?.allow_modif;
+    }
     const modif = h('input', { type: 'checkbox', checked: S.modif[key] ? '' : null });
-    modif.addEventListener('change', () => { S.modif[key] = modif.checked; paint(); });
+    modif.addEventListener('change', () => {
+      S.modif[key] = modif.checked;
+      try { localStorage.setItem(modifKey, modif.checked ? '1' : '0'); } catch (e) { /* storage unavailable */ }
+      paint();
+    });
+    const modePill = c ? (c.allow_modif ? pill('warn', 'Changes allowed', 'Started with launch.sh --allow-modif: the MLflow UI can change this database')
+      : pill('ok', 'Read-only UI', 'Started without --allow-modif: the MLflow UI reads only (a read-only Postgres user)')) : '';
     const running = db.state === 'running';
     return h('div', { class: 'db-sec' },
-      h('div', { class: 'db-head' }, h('b', {}, title), pgPill(db.state), h('code', { class: 'sv-path' }, where)),
+      h('div', { class: 'db-head' }, h('b', {}, title), pgPill(db.state), modePill, h('code', { class: 'sv-path' }, where)),
       notCentral,
       h('dl', { class: 'db-facts' },
         h('dt', {}, 'Folder in use'), h('dd', {}, inUse ? h('code', { class: 'sv-path', title: db.data_directory ? 'Asked to Postgres (show data_directory)' : 'From the container' }, inUse) : h('span', { class: 'hint' }, running ? 'unknown' : 'None (stopped)')),
         h('dt', {}, 'Container'), h('dd', {}, c ? h('span', {}, h('code', {}, c.id), ` ${c.name} · ${c.image} · started ${c.started}`,
-          h('span', { class: 'hint' }, ` · by ${c.by}${c.allow_modif ? ' · changes allowed in the MLflow UI' : ''}`))
+          h('span', { class: 'hint' }, ` · by ${c.by}`))
           : h('span', { class: 'hint' }, 'None of yours running')),
         ...(c ? [h('dt', {}, 'MLflow UI'), h('dd', {}, uiLink(sv, which))] : [])),
       folders.length ? h('div', { class: 'rs-scroll' }, h('table', { class: 'db-folders' },
@@ -303,10 +322,11 @@
       imagePicker(sv, key),
       h('div', { class: 'db-acts' },
         actionButton(sv, 'db_start', `Start on ${pick ? base(pick) : '...'}`, { primary: true, disabled: !sv.connected || running || !pick || !S.image[key],
-          args: { which, folder: pick, allow_modif: !!S.modif[key], image: S.image[key] }, after: 'read the databases again to see it',
+          args: { which, folder: pick, allow_modif: !!S.modif[key], image: S.image[key] },
           title: running ? 'Already running: stop it first' : `db/launch.sh in ${S.image[key]}: Postgres, then the MLflow UI on port ${which === 'own' ? p.ui_port : p.sync_ui_port}` }),
-        h('label', { class: 'db-opt', title: 'launch.sh --allow-modif: the MLflow UI can change the database (else it reads only)' }, modif, 'Allow changes in the MLflow UI'),
-        actionButton(sv, 'db_stop', 'Stop', { danger: true, confirm: 'Click again to stop', disabled: !sv.connected || !c, args: { which, container: c?.id }, after: 'read the databases again to see it',
+        h('label', { class: 'db-opt', title: 'launch.sh --allow-modif: the MLflow UI can change the database (else it reads only). Remembered in this browser; used at the next Start' }, modif, 'Allow changes in the MLflow UI',
+          c && !!c.allow_modif !== !!S.modif[key] ? h('span', { class: 'hint' }, ` (now ${c.allow_modif ? 'allowed' : 'read-only'}: applies at the next start)`) : ''),
+        actionButton(sv, 'db_stop', 'Stop', { danger: true, confirm: 'Click again to stop', disabled: !sv.connected || !c, args: { which, container: c?.id },
           title: c ? `docker container stop ${c.id}` : 'No container of yours is running' }),
         actionButton(sv, 'db_new', 'New dated database', { confirm: 'Click again to create it', disabled: !sv.connected || !sv.db?.empty_db, args: { which },
           title: sv.db?.empty_db ? `A copy of ${p.empty_db}` : `${p.empty_db} not found` }),
@@ -350,7 +370,7 @@
         cur ? h('div', { class: 'db-image-state' },
           there ? pill('ok', 'On the server') : pill('bad', 'Not on the server', 'Starting never downloads it: pull it first'),
           h('span', { class: 'hint' }, meta ? `Created ${meta.created} · ${meta.size}` : ''),
-          !there ? actionButton(sv, 'db_pull', 'Pull', { disabled: !sv.connected, args: { image: cur }, after: 'read the databases again to see it', title: `docker pull ${cur} on ${sv.name} (can take minutes)` }) : '',
+          !there ? actionButton(sv, 'db_pull', 'Pull', { disabled: !sv.connected, args: { image: cur }, title: `docker pull ${cur} on ${sv.name} (can take minutes)` }) : '',
           cur !== def && def ? h('button', { type: 'button', class: 'db-reset', onclick: () => choose(def) }, 'Back to the Default') : '') : ''));
   }
 
@@ -364,7 +384,7 @@
       h('p', { class: 'hint' }, `Creates ${p.synchronised} (artifacts, checkpoints, socket) and copies ${base(p.empty_db)} to ${base(p.synchronised)}/db_<today>. `
         + 'Make this server the central one afterwards to sync into it.'),
       h('div', { class: 'db-acts' }, actionButton(sv, 'db_new', 'Create a synchronised database here', {
-        confirm: 'Click again to create it', args: { which: 'sync' }, after: 'read the databases again to see it',
+        confirm: 'Click again to create it', args: { which: 'sync' },
         disabled: !sv.connected || !sv.db || !sv.db.empty_db,
         title: !sv.db ? 'Read the databases first' : sv.db.empty_db ? `A copy of ${p.empty_db}` : `${p.empty_db} not found on ${sv.name}` })));
   }

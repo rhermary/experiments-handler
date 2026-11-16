@@ -1015,3 +1015,4 @@ header #reload { padding: 5px 12px; font-size: 13px; border-radius: 8px; }
 .rs-runlist tr.rs-runrow.d2 td:first-child { padding-left: 62px; box-shadow: inset 49px 0 0 var(--panel), inset 50px 0 0 var(--line); }
 .rs-runlist tr.rs-runrow td { font-size: 12.5px; }
 .rs-foldbar { display: flex; justify-content: flex-end; gap: 6px; }
+.db-ui.modif { color: var(--warn-ink, #93600a); border-color: color-mix(in srgb, #e0a100 50%, var(--line)); }
