@@ -16,6 +16,7 @@
     db_image: ['Database image', 'Default image to start the databases in (else the Docker image variable); can be changed at each start'],
     ui_port: ['Own MLflow UI port', 'On the server'], sync_ui_port: ['Synchronised MLflow UI port', 'On the server'],
     datasets: ['Datasets folder', 'Your datasets: <name>/processed (Datasets tab)'],
+    ckpt_cache: ['Checkpoints cache', 'Synchronised checkpoints sent here: {checkpoints,artifacts}/<experiment id>/<run> (Sync tab)'],
   };
   const DERIVED = [['repo', 'Repo mirror'], ['launches', 'Launch folders'], ['queue', 'Queue'], ['sync_db_pattern', 'Synchronised databases'],
     ['sync_artifacts', 'Synchronised artifacts'], ['sync_checkpoints', 'Synchronised checkpoints']];
@@ -61,11 +62,16 @@
       const r = await api('/api/servers/run', { server, action, args });
       const i = listed().findIndex((x) => x.name === server);
       if (i >= 0) S.data.servers[i] = r.server;
+      if ('ckcatalog' in r) S.data.ckcatalog = r.ckcatalog;
       if (quiet) { delete S.busy[server + action]; return r.result.ok; }
       status(`${r.result.title} ${r.result.ok ? 'done' : 'failed'}${after && r.result.ok ? `: ${after}` : ''}`, !r.result.ok,
         { label: 'Commands and output', fn: () => commandsDialog(r.result.title, r.steps, r.result.id) });
-      if (!r.result.ok || ['db_scripts', 'db_start', 'db_new', 'sync_run', 'sync_ckpt', 'ds_send'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
+      if (!r.result.ok || ['db_scripts', 'db_start', 'db_new', 'sync_run', 'sync_ckpt', 'ds_send', 'ck_send', 'ck_remove', 'ck_link'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
       if (action === 'ds_send') await run(server, 'ds_status', {}, null, true);          // what it has now
+      if (['ck_send', 'ck_remove', 'ck_link'].includes(action)) {
+        if (action === 'ck_send') S.ck.sel[server] = new Set();
+        await run(server, 'ck_status', {}, null, true);
+      }
       if (['db_start', 'db_stop', 'db_new', 'db_pull'].includes(action)) {      // the databases (and images) as they are now
         if (action === 'db_start' && r.result.ok) await new Promise((ok) => setTimeout(ok, 3000));   // Postgres needs a moment to answer
         await run(server, 'db_status', {}, null, true);
@@ -86,6 +92,7 @@
     status: ['Read all states', (s) => !s.disabled && s.connected],
     db_status: ['Read all databases', (s) => !s.disabled && s.connected],
     ds_status: ['Read all datasets', (s) => !s.disabled && s.connected],
+    ck_status: ['Read all caches', (s) => !s.disabled && s.connected && !s.central],
   };
 
   function allButton(action, opts = {}) {
@@ -226,7 +233,7 @@
   }
 
   function logTable(kind) {
-    const rows = S.log.filter((a) => !kind || a.kind.startsWith(kind + '_'));
+    const rows = S.log.filter((a) => !kind || a.kind.startsWith(kind + '_') || (kind === 'sync' && a.kind.startsWith('ck_')));
     if (!rows.length) return h('p', { class: 'hint' }, 'No action yet.');
     return h('table', { class: 'sv-log-table' },
       h('thead', {}, h('tr', {}, ...['When', 'Action', 'Server', 'Steps', 'Result', ''].map((t) => h('th', {}, t)))),
@@ -555,8 +562,139 @@
         + 'and their artifacts; the artifacts first, then the rows in one transaction, then both are checked: a failed sync keeps no rows. '
         + 'Checkpoints: the checkpoint folders of the runs already synchronised (tar | tar through this machine), then checked. Nothing is deleted anywhere. ">_" shows every command.'),
       ...servers.map((sv) => syncCard(sv, central)),
+      ckCacheCard(servers, central),
       h('details', { class: 'card sv-card' }, h('summary', {}, h('b', {}, 'Sync actions'), h('span', { class: 'hint' }, '  with their commands and output')),
         h('div', { class: 'rs-scroll' }, logTable('sync'))));
+  }
+
+  /* ---------- Sync tab: the checkpoints cache. The synchronised checkpoints of the central server, sent (when you
+     click) into the cache of another server, for tests where GPUs are free (ckcache.py) ---------- */
+
+  S.ck = { exp: '', block: '', q: '', sel: {}, rm: {} };
+  const RUN_ID = /^[0-9a-f]{32}$/;
+
+  /* the list blocks of the XPs whose values are run ids: {key, label, ids} */
+  function runBlocks() {
+    return (cfg.xps || []).flatMap((x) => (x.blocks || []).filter((b) => b.kind === 'list' && (b.items || []).some((it) => RUN_ID.test(String(it.value))))
+      .map((b) => ({ key: `${x.name}\u0000${b.id}`, label: `${x.name} · ${b.label}`, ids: new Set(b.items.map((it) => String(it.value))) })));
+  }
+
+  function ckCacheCard(servers, central) {
+    const cat = S.data?.ckcatalog;
+    const targets = servers.filter((s) => !s.central);
+    const runs = (cat?.experiments || []).flatMap((x) => x.runs.map((r) => ({ ...r, exp: x })));
+    const blocks = runBlocks();
+    if (S.ck.block && !blocks.some((b) => b.key === S.ck.block)) S.ck.block = '';
+    if (S.ck.exp && !(cat?.experiments || []).some((x) => x.id === S.ck.exp)) S.ck.exp = '';
+    const blk = blocks.find((b) => b.key === S.ck.block);
+    const q = S.ck.q.trim().toLowerCase();
+    const shown = runs.filter((r) => (!S.ck.exp || r.exp.id === S.ck.exp) && (!blk || blk.ids.has(r.id))
+      && (!q || `${r.name} ${r.id} ${r.exp.name} ${r.status}`.toLowerCase().includes(q)));
+    const state = (t, r) => {
+      if (!t.ckcache) return 'unknown';
+      const y = t.ckcache.runs?.[r.key];
+      if (!y) return 'missing';
+      return y.files === r.files && y.bytes === r.bytes && y.config === r.config ? 'same' : 'differs';
+    };
+    const selOf = (t) => (S.ck.sel[t.name] ??= new Set());
+    const cacheOf = (t) => t.paths_all.ckpt_cache;
+    const total = (t) => Object.values(t.ckcache?.runs || {}).reduce((a, y) => a + (y.bytes || 0), 0);
+
+    const select = (label, value, options, onchange) => {
+      const el = h('select', { 'aria-label': label }, ...options.map(([v, t]) => h('option', { value: v }, t)));
+      el.value = value;
+      el.addEventListener('change', () => onchange(el.value));
+      return el;
+    };
+    const filter = h('input', { type: 'search', placeholder: 'Filter: name, id, status', value: S.ck.q, 'aria-label': 'Filter the runs' });
+    filter.addEventListener('input', () => { S.ck.q = filter.value; clearTimeout(S.ck.t); S.ck.t = setTimeout(() => { paint(); $('#ck-filter')?.focus(); }, 250); });
+    filter.id = 'ck-filter';
+    const controls = h('div', { class: 'ck-controls' },
+      select('Experiment', S.ck.exp, [['', `All experiments (${runs.length})`], ...(cat?.experiments || []).map((x) => [x.id, `${x.name || '(no name)'} · id ${x.id} (${x.runs.length})`])],
+        (v) => { S.ck.exp = v; paint(); }),
+      select('Runs of an XP block', S.ck.block, [['', 'Any run (no XP block)'], ...blocks.map((b) => [b.key, `Runs of ${b.label} (${b.ids.size})`])],
+        (v) => { S.ck.block = v; paint(); }),
+      filter,
+      h('span', { class: 'hint' }, `${shown.length} shown`));
+
+    const readCentral = central ? (central.connected ? actionButton(central, 'ck_read', cat ? 'Read again' : 'Read the runs', {
+      title: `Read-only: the runs of the synchronised database and the checkpoint folders of ${central.paths_all.sync_checkpoints}` }) : pill('off', 'Not connected')) : '';
+    const readBtn = (t) => (t.connected ? actionButton(t, 'ck_status', t.ckcache ? 'Read again' : 'Read', { title: `Read-only: the runs in ${cacheOf(t)}` })
+      : pill('off', 'Not connected'));
+    const linkCell = () => {
+      const c = central?.ckcache;
+      return central?.connected ? h('span', {}, actionButton(central, 'ck_status', c ? 'Read again' : 'Read', { title: `Read-only: ${cacheOf(central)}/checkpoints` }), ' ',
+        c?.link ? pill('ok', 'Linked', `${cacheOf(central)}/checkpoints -> ${c.link}`)
+          : actionButton(central, 'ck_link', 'Link', { confirm: 'Click again to link', disabled: !c,
+            title: c ? `${cacheOf(central)}/{checkpoints,artifacts} become links to the synchronised folders: the same paths work on ${central.name}` : 'Read it first' })) : '';
+    };
+    const cell = (t, r) => {
+      const st = state(t, r);
+      if (st === 'unknown') return h('td', { class: 'ds-cell hint' }, '?');
+      if (st === 'same') {
+        const rm = S.ck.rm[t.name] === r.key;
+        return h('td', { class: 'ds-cell' }, pill('ok', 'There'), ' ',
+          h('button', { type: 'button', class: 'ds-ign' + (rm ? ' armed' : ''), title: `Delete ${r.key} from the cache of ${t.name} (only there)`,
+            disabled: S.busy[t.name + 'ck_remove'] ? '' : null,
+            onclick: () => {
+              if (!rm) { S.ck.rm[t.name] = r.key; paint(); setTimeout(() => { if (S.ck.rm[t.name] === r.key) { delete S.ck.rm[t.name]; paint(); } }, 4000); return; }
+              delete S.ck.rm[t.name];
+              run(t.name, 'ck_remove', { runs: [r.key] });
+            } }, rm ? 'Click again' : 'Remove'));
+      }
+      const set = selOf(t);
+      const cb = h('input', { type: 'checkbox', checked: set.has(r.key) ? '' : null, 'aria-label': `Send ${r.name || r.id} to ${t.name}` });
+      cb.addEventListener('change', () => { if (cb.checked) set.add(r.key); else set.delete(r.key); paint(); });
+      return h('td', { class: 'ds-cell' }, h('label', {}, cb, st === 'missing' ? pill('bad', 'Missing') : pill('warn', 'Differs')));
+    };
+    const sendBtn = (t) => {
+      const keys = new Set(runs.map((r) => r.key));
+      const sel = [...selOf(t)].filter((k) => keys.has(k));
+      const size = runs.filter((r) => sel.includes(r.key)).reduce((a, r) => a + r.bytes, 0);
+      const why = !t.connected ? `Connect ${t.name} first` : !central?.connected ? `Connect ${central?.name} first` : !sel.length ? 'Nothing selected' : '';
+      return actionButton(t, 'ck_send', sel.length ? `Send ${sel.length} (${gb(size)})` : 'Send', {
+        primary: true, confirm: `Click again: ${sel.length} to ${t.name}`, disabled: !!why, args: { runs: sel },
+        title: why || `From ${central.name} into ${cacheOf(t)}: each checkpoint folder (tar | tar through this machine, moved into place once complete), the configs, then a check` });
+    };
+    const pickMissing = (t) => {
+      const todo = shown.filter((r) => ['missing', 'differs'].includes(state(t, r)));
+      return todo.length ? h('button', { type: 'button', class: 'tiny', title: `Select the ${todo.length} run(s) shown that ${t.name} does not have`,
+        onclick: () => { const set = selOf(t); const all = todo.every((r) => set.has(r.key)); todo.forEach((r) => (all ? set.delete(r.key) : set.add(r.key))); paint(); } },
+      todo.every((r) => selOf(t).has(r.key)) ? 'Unselect shown' : `Select shown (${todo.length})`) : '';
+    };
+    const ex = cat?.experiments?.[0];
+    const sample = (t) => `${cacheOf(t)}/checkpoints/${ex?.id || '<experiment id>'}/$RUN_ID/last.ckpt`;
+    const body = !central ? h('p', { class: 'empty' }, 'No central server: choose one in Servers > Edit servers.')
+      : !cat ? h('p', { class: 'empty' }, `Read the runs of ${central.name} first.`)
+      : cat.folder_missing ? h('p', { class: 'db-warn' }, `${cat.folder_missing} does not exist on ${central.name}: no checkpoint synchronised yet.`)
+      : h('div', {},
+        cat.error ? h('p', { class: 'db-warn' }, `The synchronised database did not answer: the runs are listed by id only (start it in Databases to see their names). ${cat.error}`) : '',
+        controls,
+        h('div', { class: 'rs-scroll' }, h('table', { class: 'db-folders sync-table ds-table ck-table' },
+          h('thead', {},
+            h('tr', {}, h('th', {}, 'Run'), h('th', { class: 'ds-src' }, `${central.name} (synchronised)`), ...targets.map((t) => h('th', {}, t.name, ' ', readBtn(t)))),
+            h('tr', {}, h('th', { class: 'hint' }, 'name · id · status'), h('th', { class: 'ds-src hint' }, linkCell()),
+              ...targets.map((t) => h('th', { class: 'hint' }, t.ckcache?.folder_missing ? 'Empty (created by a send)' : t.ckcache ? `${Object.keys(t.ckcache.runs).length} runs · ${gb(total(t))} · read ${t.ckcache.when}` : 'not read',
+                ' ', pickMissing(t))))),
+          h('tbody', {}, ...shown.map((r) => h('tr', {},
+            h('td', { class: 'ds-name' }, h('div', {}, h('span', {}, r.name || h('i', { class: 'hint' }, 'not in the database')),
+              h('code', { class: 'hint', title: r.key }, ` ${r.id.slice(0, 8)}`)),
+              h('div', { class: 'hint' }, [S.ck.exp ? '' : (r.exp.name || `experiment ${r.exp.id}`), r.status, r.start].filter(Boolean).join(' · '))),
+            h('td', { class: 'ds-src' }, h('span', {}, gb(r.bytes)), h('span', { class: 'hint' }, ` · ${r.files} file${r.files === 1 ? '' : 's'}`),
+              r.config ? '' : h('div', { class: 'ck-warn', title: 'artifacts/config.yaml is missing in the synchronised artifacts: a test needs it' }, 'no config.yaml')),
+            ...targets.map((t) => cell(t, r))))),
+          h('tfoot', {}, h('tr', {}, h('td', {}, h('b', {}, 'Send')), h('td', { class: 'ds-src hint' }, `${shown.length} of ${runs.length} runs`),
+            ...targets.map((t) => h('td', { class: 'ds-cell' }, t.ckcache ? sendBtn(t) : '')))))),
+        h('p', { class: 'hint' }, 'In a test XP, on any server (the central one once linked): ', h('code', {}, sample(targets[0] || central)),
+          ' and ', h('code', {}, `${(targets[0] || central).paths_all.ckpt_cache}/artifacts/${ex?.id || '<experiment id>'}/$RUN_ID/artifacts/config.yaml`), '.'));
+    return h('div', { class: 'card sv-card ck-card' },
+      h('div', { class: 'db-top' }, h('b', { class: 'db-name' }, 'Checkpoints Cache'),
+        h('span', { class: 'hint' }, central ? `the synchronised checkpoints of ${central.name}, sent to other servers for tests` : ''),
+        h('span', { class: 'sp' }), cat?.when ? h('span', { class: 'hint' }, `read ${cat.when}`) : '', readCentral, allButton('ck_status')),
+      h('p', { class: 'hint' }, 'Send copies the selected runs from the synchronised folders into the cache of a server (Servers > Paths: Checkpoints cache), '
+        + 'with the same layout: checkpoints/<experiment id>/<run> and artifacts/<experiment id>/<run>/artifacts/config.yaml. Each run goes through this machine '
+        + '(tar | tar), is moved into place once complete, then files and bytes are compared. Nothing is sent or removed by itself.'),
+      body);
   }
 
   /* ---------- Datasets tab: the processed folders of your datasets on each server, sent from a source ---------- */

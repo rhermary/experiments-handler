@@ -107,7 +107,7 @@ def _text(v):
 # Where things are on a server. Defaults from one base folder; each can be changed per server (Settings > Servers).
 PATH_KEYS = ("base", "db_pattern", "psql_sock", "pg_port", "artifacts", "checkpoints", "launcher",
              "synchronised", "sync_sock", "sync_port", "scripts", "empty_db", "db_image", "ui_port", "sync_ui_port",
-             "datasets")
+             "datasets", "ckpt_cache")
 DEFAULT_BASE = "/data/experiments"
 
 
@@ -124,7 +124,8 @@ def server_paths(sv):
            "launcher": f"{base}/launcher", "synchronised": sync, "sync_sock": f"{sync}/psql_sock", "sync_port": "5556",
            "scripts": f"{base}/scripts", "empty_db": f"{base}/_empty_db", "db_image": "", "ui_port": "5923",
            "sync_ui_port": "5924",
-           "datasets": f"/data/{sv.get('user') or getpass.getuser()}/datasets"}       # <name>/processed (Datasets tab)
+           "datasets": f"/data/{sv.get('user') or getpass.getuser()}/datasets",       # <name>/processed (Datasets tab)
+           "ckpt_cache": f"{base}/checkpoints-cache"}         # synchronised checkpoints sent here (ckcache.py)
     out.update({k: v for k, v in over.items() if v})
     out.update({"repo": f"{out['launcher']}/repo", "launches": f"{out['launcher']}/launches", "queue": f"{out['launcher']}/queue",
                 "sync_db_pattern": f"{out['synchronised']}/db_*", "sync_artifacts": f"{out['synchronised']}/artifacts",

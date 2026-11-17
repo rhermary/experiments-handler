@@ -1029,3 +1029,12 @@ header #reload { padding: 5px 12px; font-size: 13px; border-radius: 8px; }
 .rs-table td.queued { background: color-mix(in srgb, var(--accent) 7%, var(--panel)); outline: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: -3px; }
 .rs-table td.marked { background: color-mix(in srgb, #e0a100 18%, var(--panel)); color: var(--warn-ink, #93600a); }
 
+/* Sync tab: the checkpoints cache */
+.ck-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.ck-controls select { max-width: 340px; }
+.ck-controls input[type=search] { min-width: 200px; flex: 0 1 260px; }
+.ck-table .ds-name code { font-size: 11px; }
+.ck-table th .tiny { margin-left: 4px; }
+.ck-warn { color: var(--bad, #b3261e); font-size: 11px; }
+.ck-table .ds-ign.armed { color: var(--bad, #b3261e); border-color: currentColor; }
+.ck-table .ds-ign.armed { opacity: 1; }

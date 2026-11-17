@@ -21,6 +21,7 @@ from flask import Flask, Response, jsonify, request, send_file, send_from_direct
 import checker
 import core
 import actions
+import ckcache
 import datasets
 import diffview
 import remote
@@ -603,7 +604,7 @@ _STATUS = {}                                                 # server name -> it
 
 def _server_view(sv, cfg=None):
     return {**sv, "paths_all": core.server_paths(sv), "connected": remote.connected(sv), "status": _STATUS.get(sv["name"]),
-            "db": _DB.get(sv["name"]), "datasets": _DS.get(sv["name"]), "image_default": _image(cfg or core.load(), sv),
+            "db": _DB.get(sv["name"]), "datasets": _DS.get(sv["name"]), "ckcache": _CK.get(sv["name"]), "image_default": _image(cfg or core.load(), sv),
             "sync": sync.light(sync.PLANS.get(sv["name"])), "synced": {k: _SYNCED[sv["name"], k] for k in ("results", "checkpoints") if (sv["name"], k) in _SYNCED}}
 
 
@@ -614,11 +615,12 @@ def api_servers():
     cfg = core.load()
     listed = [s for s in cfg["servers"] if "name" in s]
     return jsonify(servers=[_server_view(s, cfg) for s in listed], central=(core.central_server(cfg) or {}).get("name"),
-                   path_keys=list(core.PATH_KEYS))
+                   path_keys=list(core.PATH_KEYS), ckcatalog=ckcache.CATALOG or None)
 
 
 _DB = {}                                                     # server name -> its databases from the last "db_status"
 _DS = {}                                                     # server name -> its datasets from the last "ds_status"
+_CK = {}                                                     # server name -> its checkpoints cache from the last "ck_status"
 
 
 def _image(cfg, sv=None):
@@ -643,6 +645,11 @@ SERVER_ACTIONS = {
     "sync_run": ("sync the results to the central server", lambda cfg, sv, a: sync.sync_steps(sv, core.central_server(cfg), a.get("experiments") or [])),
     "ds_status": ("read the datasets", lambda cfg, sv, a: datasets.status_steps(sv)),
     "ds_send": ("send datasets", lambda cfg, sv, a: datasets.send_steps(cfg, sv, a)),
+    "ck_read": ("read the synchronised checkpoints", lambda cfg, sv, a: ckcache.read_steps(sv)),
+    "ck_status": ("read the checkpoints cache", lambda cfg, sv, a: ckcache.status_steps(sv)),
+    "ck_send": ("send checkpoints to the cache", lambda cfg, sv, a: ckcache.send_steps(cfg, sv, a)),
+    "ck_remove": ("remove checkpoints from the cache", lambda cfg, sv, a: ckcache.remove_steps(cfg, sv, a)),
+    "ck_link": ("link the checkpoints cache", lambda cfg, sv, a: ckcache.link_steps(cfg, sv)),
     "sync_ckpt": ("sync the checkpoints to the central server", lambda cfg, sv, a: sync.ckpt_steps(sv, core.central_server(cfg), a.get("experiments") or [])),
 }
 _SYNCED = {}                                                 # (server name, results|checkpoints) -> the last sync: {when, id, ok, out}
@@ -678,6 +685,8 @@ def api_servers_run():
         _DB[sv["name"]] = {**remote.parse_db_status(sv, res["steps"][0]["out"]), "when": res["when"]}
     if body["action"] == "ds_status" and res["ok"]:
         _DS[sv["name"]] = {**datasets.parse_status(res["steps"][0]["out"]), "when": res["when"]}
+    if body["action"] == "ck_status" and res["ok"]:
+        _CK[sv["name"]] = {**ckcache.parse_list(res["steps"][0]["out"]), "when": res["when"]}
     if body["action"] == "db_sizes" and res["ok"]:
         sizes = {ln.split("\t", 1)[1]: int(ln.split("\t", 1)[0]) for ln in res["steps"][0]["out"].splitlines() if "\t" in ln}
         _DB.setdefault(sv["name"], {}).setdefault("sizes", {}).update(sizes)
@@ -695,7 +704,9 @@ def api_servers_run():
         _STATUS.pop(sv["name"], None)
         _DB.pop(sv["name"], None)
         _DS.pop(sv["name"], None)
-    return jsonify(result={k: v for k, v in res.items() if k != "steps"}, steps=res["steps"], server=_server_view(sv, cfg))
+        _CK.pop(sv["name"], None)
+    out_extra = {"ckcatalog": ckcache.CATALOG or None} if body["action"] == "ck_read" else {}
+    return jsonify(**out_extra, result={k: v for k, v in res.items() if k != "steps"}, steps=res["steps"], server=_server_view(sv, cfg))
 
 
 @app.get("/api/actions")
