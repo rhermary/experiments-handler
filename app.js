@@ -537,10 +537,20 @@ const SCOPE_TEXT = { script: 'Script', container: '-e', loop: 'Loop' };
 const SCOPE_TITLE = { script: 'Script variable: not passed to the container', container: 'Passed to the container with -e',
   loop: 'Set inside the loop, for each run (@@LOOP_ENV@@)' };
 
+/* [row, name] of a block's selection, as core.list_row gives it: values selected in a list block are one value's row,
+   or several as its loop row, named "N selected" (the source the server gives their variables) */
+function selectedRow(b) {
+  const c = st.blocks[b.id];
+  if (!Array.isArray(c)) return [b.rows.find((r) => r.name === c), c];
+  const names = [...new Set(c)].filter((n) => b.rows.some((r) => r.name === n && !r.loop_all));
+  if (names.length === 1) return [b.rows.find((r) => r.name === names[0]), names[0]];
+  const name = `${(b.items || []).filter((it) => names.includes(it.label || it.value)).length} selected`;
+  return [b.rows.find((r) => r.loop_all), name];
+}
+
 /* Under each block: the variables its selected option sets, by scope, with the checker's verdict. */
 function blockVars(b) {
-  const rowName = st.blocks[b.id];
-  const row = b.rows.find((r) => r.name === rowName);
+  const [row, rowName] = selectedRow(b);
   const mine = `${b.label}: ${rowName}`;
   const entries = Object.entries(row?.vars || {});
   if (!entries.length) return [h('p', { class: 'hint' }, b.kind === 'fixed' ? 'Nothing yet: Edit to set the variables every run of this XP needs (e.g. what the base config lacks).' : 'Sets nothing')];

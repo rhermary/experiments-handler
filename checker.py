@@ -147,7 +147,7 @@ def setters(cfg, sel):
         for v in lst:
             out.setdefault(v["name"], []).append(("variable default" if not v["xp"] else "variable of this XP", v["value"]))
     for b in core.xp_of(cfg, sel.get("xp"))["blocks"]:
-        row = core.pick(b["rows"], (sel.get("blocks") or {}).get(b["id"]), b["label"])
+        row = core.block_row(b, (sel.get("blocks") or {}).get(b["id"]))
         for k, v in row["vars"].items():
             out.setdefault(core.full_name(b, k, prefix), []).append((f"{b['label']}: {row['name']}", v))
     for name, v in (sel["values"] if "values" in sel else core.xp_of(cfg, sel.get("xp")).get("values") or {}).items():
