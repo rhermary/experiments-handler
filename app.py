@@ -717,6 +717,13 @@ def api_jobs_past_log():
     return jsonify(text=jobs.past_log(core.load(), str(body.get("server") or ""), str(body.get("name") or "")))
 
 
+@app.post("/api/jobs/vars")
+def api_jobs_vars():
+    """The variables of a running job as its task has them now (loop values included): body {server, id}."""
+    body = request.get_json(force=True)
+    return jsonify(jobs.variables(core.load(), str(body.get("server") or ""), str(body.get("id") or "")))
+
+
 @app.post("/api/jobs/logs")
 def api_jobs_logs():
     """The last lines of a job's output: body {server (none: this machine), id}."""

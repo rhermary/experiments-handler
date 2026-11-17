@@ -8,6 +8,7 @@
   const showHidden = {};                            // server -> its hidden outputs listed too
   const open = {};                                  // "server\u0000id" -> the logs shown under a job
   const asking = {};                               // the same key -> waiting for "Confirm stop"
+  const vars = {};                                 // the same key -> the variables shown (read when asked)
 
   const dur = (s) => (s == null ? '' : s < 3600 ? `${Math.floor(s / 60)} min` : s < 86400 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`
     : `${Math.floor(s / 86400)} d ${Math.floor((s % 86400) / 3600)} h`);
@@ -121,6 +122,27 @@
   }
 
   const readLogs = (p, j) => readOut(open, keyOf(p, j), () => api('/api/jobs/logs', { server: p.server || '', id: j.id }), '(no output yet)');
+  /* the variables of the task now (read inside the container): the loop ones (this iteration) first */
+  async function showVars(p, j) {
+    const k = keyOf(p, j);
+    if (vars[k] !== undefined) { delete vars[k]; paint(); return; }
+    vars[k] = null; paint();
+    try { vars[k] = await api('/api/jobs/vars', { server: p.server || '', id: j.id }); } catch (e) { vars[k] = { error: e.message }; }
+    paint();
+  }
+  function varsBox(v) {
+    if (v === null) return h('p', { class: 'hint' }, 'Reading the variables of the task...');
+    if (v.error) return h('p', { class: 'dlg-err' }, v.error);
+    const pfx = (cfg?.project?.env_prefix) || '';
+    const row = (x) => h('tr', { class: x.loop ? 'j-var-loop' : '' }, h('td', { class: 'mono', title: x.name }, x.name.slice(pfx.length)),
+      h('td', { class: 'mono' }, x.value), h('td', { class: 'hint' }, x.loop ? 'this iteration' : ''));
+    const loop = v.vars.filter((x) => x.loop), rest = v.vars.filter((x) => !x.loop);
+    return h('div', { class: 'j-vars' },
+      h('p', { class: 'hint' }, v.container_only ? 'No task running at this moment (between two iterations of the loop): the variables of the container'
+        : h('span', {}, 'Task: ', h('code', {}, v.task))),
+      h('div', { class: 'rs-scroll' }, h('table', { class: 'j-var-table' }, h('tbody', {}, ...loop.map(row), ...rest.map(row)))));
+  }
+
   async function showLogs(p, j) {
     const k = keyOf(p, j);
     if (open[k] !== undefined) { delete open[k]; paint(); return; }
@@ -156,11 +178,15 @@
         h('div', { class: 'q-acts' },
           h('button', { type: 'button', class: 'tiny', 'aria-pressed': String(open[k] !== undefined), onclick: () => showLogs(p, j) }, open[k] !== undefined ? 'Hide Output' : 'Output'),
           open[k] !== undefined ? refreshBtn(k, () => readLogs(p, j)) : '',
+          h('button', { type: 'button', class: 'tiny', 'aria-pressed': String(vars[k] !== undefined),
+            title: 'The variables of the task as it runs now, with the values the command loop gives this iteration', onclick: () => showVars(p, j) },
+            vars[k] !== undefined ? 'Hide Variables' : 'Variables'),
           asking[k] ? h('button', { type: 'button', class: 'tiny', onclick: () => { delete asking[k]; paint(); } }, 'Cancel') : '',
           h('button', { type: 'button', class: 'tiny danger', title: 'docker stop: the job gets SIGTERM, then SIGKILL after 30 s', onclick: () => stop(p, j) },
             asking[k] ? 'Confirm stop' : 'Stop'))),
       h('div', { class: 'q-meta hint' }, `${j.id} · started ${j.started} UTC`, j.launch ? ' · launch ' : '', j.launch ? h('code', {}, j.launch) : '',
-        j.cmd ? h('span', { class: 'j-cmd', title: j.cmd }, ` · ${j.cmd}`) : ''),
+        j.config ? ' · config ' : '', j.config ? h('code', { title: j.cmd }, j.config) : ''),
+      vars[k] !== undefined ? varsBox(vars[k]) : '',
       asking[k] ? h('p', { class: 'q-note' }, 'Stop this job? It runs: ', h('code', {}, asking[k])) : '',
       open[k] !== undefined ? h('pre', { class: 'j-logs', 'data-out': outTag(k) }, open[k]) : '');
   }

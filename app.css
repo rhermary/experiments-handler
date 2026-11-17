@@ -1016,3 +1016,9 @@ header #reload { padding: 5px 12px; font-size: 13px; border-radius: 8px; }
 .rs-runlist tr.rs-runrow td { font-size: 12.5px; }
 .rs-foldbar { display: flex; justify-content: flex-end; gap: 6px; }
 .db-ui.modif { color: var(--warn-ink, #93600a); border-color: color-mix(in srgb, #e0a100 50%, var(--line)); }
+/* Jobs: the variables of a running task */
+.j-vars { display: grid; gap: 4px; }
+.j-var-table { border-collapse: collapse; font-size: 12px; }
+.j-var-table td { padding: 2px 10px 2px 0; vertical-align: top; border-bottom: 1px solid var(--line); }
+.j-var-table td.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.j-var-table tr.j-var-loop td { font-weight: 600; background: var(--sel); }

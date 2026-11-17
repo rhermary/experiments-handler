@@ -96,7 +96,9 @@ def _parse(cfg, text):
         out.append({"id": c.get("Id", "")[:12], "full_id": c.get("Id", ""), "name": name, "image": conf.get("Image") or "",
                     "started": started[:19].replace("T", " "), "age_s": _age(started),
                     "xp": env.get(f"{prefix}SETTINGS__EXPERIMENT") or "", "devices": devices,
-                    "cmd": cmd[-300:], "launch": launch.get(c.get("Id", ""), "")})
+                    "cmd": cmd[-300:], "launch": launch.get(c.get("Id", ""), ""),
+                    # the config the task runs (python -m tasks.run <config>, as the command loop has it)
+                    "config": (re.findall(r"tasks\.run\s+(\S+)", cmd) or [""])[-1].strip("\"'")})
     return sorted(out, key=lambda j: j["started"], reverse=True)
 
 
@@ -159,6 +161,41 @@ def logs(cfg, server, cid):
     sv = _target(cfg, server)
     argv = remote.ssh_argv(sv, cmd) if sv else ["bash", "-c", cmd]
     return as_terminal(_raw(argv))[-60000:]
+
+
+def variables(cfg, server, cid):
+    """The variables of a job as its task runs them now: {task: command line of the running `tasks.run` process (or
+    ""), vars: [{name, value, loop}] (env_prefix ones; loop: set by the command loop for this iteration, i.e. not among
+    the container's -e), container: the container's own (when no task process runs: between two iterations)}."""
+    cid = _check_id(cid)
+    prefix = cfg["project"]["env_prefix"]
+    script = "\n".join([
+        f"docker inspect --format '{{{{range .Config.Env}}}}{{{{println .}}}}{{{{end}}}}' {cid}",
+        "echo @@PROC",
+        # the task's process: its command line, then its environment (read as the container's user: its own processes)
+        # (the python process: its program is python, not the bash -lc of the command loop that also names tasks.run)
+        f"docker exec {cid} sh -c 'for d in /proc/[0-9]*; do p=$(tr \"\\000\" \"\\n\" < $d/cmdline 2>/dev/null | head -n 1); "
+        "c=$(tr \"\\000\" \" \" < $d/cmdline 2>/dev/null); case \"$p\" in *python*) case \"$c\" in *tasks.run*) "
+        "echo \"@@CMD $c\"; tr \"\\000\" \"\\n\" < $d/environ; break;; esac;; esac; done' 2>/dev/null",
+        "exit 0"])
+    sv = _target(cfg, server)
+    argv = remote.ssh_argv(sv, "bash -s") if sv else ["bash", "-s"]
+    r = subprocess.run(argv, input=script, capture_output=True, text=True, timeout=40, check=False)
+    head, _, proc = r.stdout.partition("@@PROC\n")
+    container = dict(ln.split("=", 1) for ln in head.splitlines() if "=" in ln)
+    task, env = "", {}
+    for ln in proc.splitlines():
+        if ln.startswith("@@CMD "):
+            task = ln[len("@@CMD "):].strip()
+        elif "=" in ln:
+            k, v = ln.split("=", 1)
+            env[k] = v
+    if not container:
+        raise ValueError(f"no container {cid} running there: {(r.stderr or '').strip()[-200:]}")
+    source = env or container
+    out = [{"name": k, "value": v, "loop": bool(env) and container.get(k) != v}
+           for k, v in sorted(source.items()) if k.startswith(prefix)]
+    return {"task": task, "vars": out, "container_only": not env}
 
 
 def stop_steps(cfg, server, cid):
