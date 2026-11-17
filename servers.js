@@ -5,7 +5,7 @@
    ran, its commands and their output are shown (and kept in the action log).
    Depends on editors.js ($, h, api, status) and app.js (cfg, commit, clone). */
 (() => {
-  const S = { data: null, tab: null, busy: {}, log: [], pick: {}, modif: {}, image: {}, other: {}, syncSel: {}, ckptSel: {} };
+  const S = { data: null, tab: null, busy: {}, log: [], pick: {}, modif: {}, image: {}, other: {}, syncSel: {}, ckptSel: {}, freeSel: {} };
   const LABELS = {
     base: ['Base folder', 'The other paths default to it'], db_pattern: ['Own databases', 'Postgres data folders (<server>_<date>_db)'],
     psql_sock: ['Own Postgres socket', ''], pg_port: ['Own Postgres port', ''], artifacts: ['Artifacts', 'Of the runs made here'],
@@ -66,8 +66,9 @@
       if (quiet) { delete S.busy[server + action]; return r.result.ok; }
       status(`${r.result.title} ${r.result.ok ? 'done' : 'failed'}${after && r.result.ok ? `: ${after}` : ''}`, !r.result.ok,
         { label: 'Commands and output', fn: () => commandsDialog(r.result.title, r.steps, r.result.id) });
-      if (!r.result.ok || ['db_scripts', 'db_start', 'db_new', 'sync_run', 'sync_ckpt', 'ds_send', 'ck_send', 'ck_remove', 'ck_link'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
+      if (!r.result.ok || ['db_scripts', 'db_start', 'db_new', 'sync_run', 'sync_ckpt', 'sync_free', 'ds_send', 'ck_send', 'ck_remove', 'ck_link'].includes(action)) commandsDialog(r.result.title, r.steps, r.result.id);
       if (action === 'ds_send') await run(server, 'ds_status', {}, null, true);          // what it has now
+      if (action === 'sync_free') S.freeSel[server] = new Set();
       if (['ck_send', 'ck_remove', 'ck_link'].includes(action)) {
         if (action === 'ck_send') S.ck.sel[server] = new Set();
         await run(server, 'ck_status', {}, null, true);
@@ -488,10 +489,10 @@
       h('span', { class: 'sp' }),
       actionButton(sv, 'sync_preview', pv ? 'Preview again' : 'Preview', { disabled: !!notReady, title: notReady || 'Read-only: what a sync would copy (runs, files, sizes)' }));
     const parts = [head];
-    for (const [k, label] of [['results', 'results'], ['checkpoints', 'checkpoints']]) {
+    for (const [k, label] of [['results', 'results sync'], ['checkpoints', 'checkpoints sync'], ['freed', 'deletion of synced checkpoints']]) {
       const done = sv.synced?.[k];
       if (!done) continue;
-      parts.push(h('div', { class: done.ok ? 'sync-last' : 'db-warn' }, h('span', {}, `Last ${label} sync ${done.when}: ${done.ok ? 'done and checked' : 'failed (run it again: nothing of a failed row copy is kept)'}. `),
+      parts.push(h('div', { class: done.ok ? 'sync-last' : 'db-warn' }, h('span', {}, `Last ${label} ${done.when}: ${done.ok ? 'done and checked' : k === 'freed' ? 'failed (only folders identical on the central server can have been deleted: see the output)' : 'failed (run it again: nothing of a failed row copy is kept)'}. `),
         h('button', { type: 'button', class: 'db-reset', onclick: () => openLog(done.id) }, 'Commands and Output'),
         done.out ? h('pre', { class: 'sync-out' }, done.out.trim()) : ''));
     }
@@ -504,6 +505,8 @@
     const csel = S.ckptSel[sv.name] ??= new Set(ex.filter((x) => x.ckpt).map((x) => x.name));
     const todo = ex.filter((x) => sel.has(x.name) && x.new + x.changed);
     const ctodo = ex.filter((x) => csel.has(x.name) && x.ckpt);
+    const fsel = S.freeSel[sv.name] ??= new Set();          // checkpoints to delete here (identical there): none by default
+    const ftodo = ex.filter((x) => fsel.has(x.name) && x.ckpt_done > 0);
     const tot = (k, list = ex) => list.reduce((a, x) => a + x[k], 0);
     const box = (set, x, can, what) => {
       const cb = h('input', { type: 'checkbox', checked: can && set.has(x.name) ? '' : null, disabled: can ? null : '', 'aria-label': `Sync the ${what} of ${x.name}` });
@@ -520,7 +523,14 @@
         h('td', { class: 'num' + (x.old_path ? '' : ' hint'), title: x.old_example ? `Left alone, e.g. ${x.old_example}` : null }, String(x.old_path || 0)),
         h('td', { class: 'num' + (can ? '' : ' hint') }, can ? `${x.files} · ${gb(x.bytes)}` : '-'),
         box(csel, x, x.ckpt > 0, 'checkpoints'), h('td', { class: 'num' + (x.ckpt ? ' sync-new' : ' hint') }, x.ckpt ? `${x.ckpt} · ${gb(x.ckpt_bytes)}` : '0'),
-        n(x.ckpt_wait), n(x.ckpt_done));
+        n(x.ckpt_wait),
+        x.ckpt_done > 0 ? h('td', { class: 'num sync-there' }, (() => {
+          const cb = h('input', { type: 'checkbox', checked: fsel.has(x.name) ? '' : null, 'aria-label': `Delete on ${sv.name} the synchronised checkpoints of ${x.name}`,
+            title: 'Select to delete these checkpoint folders here (they are identical on the central server)' });
+          cb.addEventListener('change', () => { if (cb.checked) fsel.add(x.name); else fsel.delete(x.name); paint(); });
+          return h('label', {}, cb, ` ${x.ckpt_done} · ${gb(x.ckpt_there_bytes || 0)}`);
+        })(), x.ckpt_freed ? h('div', { class: 'hint' }, `${x.ckpt_freed} deleted here`) : '')
+          : h('td', { class: 'num hint' }, x.ckpt_freed ? `0 (${x.ckpt_freed} deleted here)` : '0'));
     };
     const nRes = tot('new', todo) + tot('changed', todo);
     parts.push(
@@ -533,19 +543,25 @@
         h('tbody', {}, ...ex.map(row)),
         h('tfoot', {}, h('tr', {}, h('td', {}, h('b', {}, 'Selected')), h('td', {}), h('td', { class: 'num' }, String(tot('new', todo))), h('td', { class: 'num' }, String(tot('changed', todo))),
           h('td', {}), h('td', {}), h('td', { class: 'num' }, `${tot('files', todo)} · ${gb(tot('bytes', todo))}`),
-          h('td', {}), h('td', { class: 'num' }, `${tot('ckpt', ctodo)} · ${gb(tot('ckpt_bytes', ctodo))}`), h('td', {}), h('td', {}))))),
+          h('td', {}), h('td', { class: 'num' }, `${tot('ckpt', ctodo)} · ${gb(tot('ckpt_bytes', ctodo))}`), h('td', {}),
+          h('td', { class: 'num' }, ftodo.length ? `${tot('ckpt_done', ftodo)} · ${gb(tot('ckpt_there_bytes', ftodo))}` : ''))))),
       pv.unknown_checkpoints ? h('p', { class: 'hint' }, `${pv.unknown_checkpoints} checkpoint folder(s) of ${pv.src_checkpoints} belong to runs in neither database: left alone.`) : '',
       Object.keys(pv.not_copied || {}).length ? h('p', { class: 'hint' }, 'Not copied (not used by this project): ' + Object.entries(pv.not_copied).map(([k, v]) => `${v} ${k}`).join(', ')) : '',
       h('p', { class: 'hint' }, '"Changed": already synced, but its status, end time, params, tags, last metrics or datasets changed since: copied again. '
         + `"Older paths": artifacts not under ${pv.src_artifacts}: left alone. Checkpoints "Waiting": their run is not synchronised yet (sync its results first); `
-        + '"There": already on the central server, identical.'),
+        + '"There": already on the central server, identical; tick it to delete those folders here (measured again first: only the identical ones go).'),
       h('div', { class: 'db-acts' },
         actionButton(sv, 'sync_run', todo.length ? `Sync results: ${nRes} run${nRes > 1 ? 's' : ''} (${gb(tot('bytes', todo))})` : 'Sync results', {
           primary: true, confirm: 'Click again to sync the results', disabled: !!notReady || !todo.length || (pv.blocking || []).length > 0,
           args: { experiments: todo.map((x) => x.name) }, title: notReady || 'The artifacts, then the rows (one transaction), then checks both' }),
         actionButton(sv, 'sync_ckpt', ctodo.length ? `Sync checkpoints: ${tot('ckpt', ctodo)} run${tot('ckpt', ctodo) > 1 ? 's' : ''} (${gb(tot('ckpt_bytes', ctodo))})` : 'Sync checkpoints', {
           primary: true, confirm: 'Click again to sync the checkpoints', disabled: !sv.connected || !ctodo.length,
-          args: { experiments: ctodo.map((x) => x.name) }, title: 'The checkpoint folders (tar | tar), then checks them; no database is touched' })));
+          args: { experiments: ctodo.map((x) => x.name) }, title: 'The checkpoint folders (tar | tar), then checks them; no database is touched' }),
+        actionButton(sv, 'sync_free', ftodo.length ? `Delete here: ${tot('ckpt_done', ftodo)} synced checkpoint${tot('ckpt_done', ftodo) > 1 ? 's' : ''} (${gb(tot('ckpt_there_bytes', ftodo))})` : 'Delete synced checkpoints here', {
+          danger: true, confirm: `Click again: delete on ${sv.name}`, disabled: !sv.connected || !central?.connected || !ftodo.length,
+          args: { experiments: ftodo.map((x) => x.name) },
+          title: ftodo.length ? `On ${sv.name} only: each folder is measured again on both servers and deleted only if its copy on ${central?.name} has the same files and bytes. Artifacts and databases are not touched.`
+            : 'Tick experiments in the "There" column first' })));
     return h('div', { class: 'card sv-card db-card' }, ...parts);
   }
 

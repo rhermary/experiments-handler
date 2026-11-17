@@ -17,6 +17,7 @@ new id, and the runs point to them). A run already in the synchronised database 
 folder (older paths) are left alone, and listed.
 """
 import getpass
+import re
 import shlex
 import subprocess
 import tempfile
@@ -244,7 +245,7 @@ def preview_steps(src_sv, dst_sv):
         there = [("c", f"{x['dst_id']}/{r}") for x in ex if x["dst_id"] for r in x["changed"] + x["synced_runs"]]
         sizes_c, _ = _sizes(dst_sv, dp["sync_artifacts"], dp["sync_checkpoints"], there)
         for x in ex:
-            x["folders"], x["ckpt"], x["ckpt_wait"], x["ckpt_done"] = {}, {}, 0, 0
+            x["folders"], x["ckpt"], x["ckpt_wait"], x["ckpt_done"], x["ckpt_there"] = {}, {}, 0, 0, {}
             for r in x["new"] + x["changed"]:
                 v = sizes.get(("a", f"{x['src_id']}/{r}"))
                 if v:
@@ -259,6 +260,7 @@ def preview_steps(src_sv, dst_sv):
                     x["ckpt_wait"] += 1                    # its run is not in the synchronised database yet
                 elif sizes_c.get(("c", f"{x['dst_id']}/{r}")) == v:
                     x["ckpt_done"] += 1
+                    x["ckpt_there"][r] = v                 # identical on the central server: can be deleted here
                 else:
                     x["ckpt"][r] = v
         plan.update(source=src_sv["name"], central=dst_sv["name"], dst_folder=dst_dir, when=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -572,7 +574,75 @@ def ckpt_done(src_name, names):
     for x in (PLANS.get(src_name) or {}).get("experiments", []):
         if x["name"] in set(names or []):
             x["ckpt_done"] += len(x["ckpt"])
+            x.setdefault("ckpt_there", {}).update(x["ckpt"])
             x["ckpt"] = {}
+
+
+SAFE = re.compile(r"^[\w.-]+$")
+
+
+def free_steps(src_sv, dst_sv, names):
+    """Delete, on the source server, the checkpoint folders already on the central server (the preview found them
+    identical). Measured again on both servers first: a folder is deleted only if its copy on the central server has
+    the same files and bytes now; the others are left (and listed). Nothing else is touched: not the artifacts, not
+    the databases, not the central server."""
+    plan = PLANS.get(src_sv["name"])
+    if not plan:
+        raise ValueError(f"preview the sync of {src_sv['name']} first")
+    if plan["central"] != (dst_sv or {}).get("name"):
+        raise ValueError("the central server changed since the preview: preview again")
+    sp, dp = core.server_paths(src_sv), core.server_paths(dst_sv)
+    chosen = [x for x in plan["experiments"] if x["name"] in set(names or []) and x.get("ckpt_there") and x["dst_id"]]
+    if not chosen:
+        raise ValueError("no synchronised checkpoint folder to delete in the experiments chosen")
+    for x in chosen:
+        root = x.get("src_root") or sp["checkpoints"]
+        if src_sv["name"] == dst_sv["name"] and root.rstrip("/") == dp["sync_checkpoints"].rstrip("/"):
+            raise ValueError("the source folder is the synchronised one: nothing to delete")
+        if not SAFE.match(str(x["src_id"])) or not all(SAFE.match(r) for r in x["ckpt_there"]):
+            raise ValueError(f"unexpected folder names in {x['name']}")
+    q = shlex.quote
+    n = sum(len(x["ckpt_there"]) for x in chosen)
+    size = sum(v[1] for x in chosen for v in x["ckpt_there"].values())
+
+    def go():
+        lines, freed = [], 0
+        for x in chosen:
+            root = x.get("src_root") or sp["checkpoints"]
+            runs = list(x["ckpt_there"])
+            a, _ = _sizes(src_sv, sp["artifacts"], root, [("c", f"{x['src_id']}/{r}") for r in runs])
+            b, _ = _sizes(dst_sv, dp["sync_artifacts"], dp["sync_checkpoints"], [("c", f"{x['dst_id']}/{r}") for r in runs])
+            ok = [r for r in runs if a.get(("c", f"{x['src_id']}/{r}")) and a.get(("c", f"{x['src_id']}/{r}")) == b.get(("c", f"{x['dst_id']}/{r}"))]
+            for r in runs:
+                if r not in ok:                            # not identical there any more: not "There" (preview again)
+                    x["ckpt_there"].pop(r, None)
+                    x["ckpt_done"] -= 1
+                    lines.append(f"{x['name']} {r}: kept ({a.get(('c', x['src_id'] + '/' + r))} here, "
+                                 f"{b.get(('c', x['dst_id'] + '/' + r))} on {dst_sv['name']}: files, bytes)")
+            if ok:
+                script = (f"cd {q(root)} && rm -rf -- " + " ".join(q(f"{x['src_id']}/{r}") for r in ok)
+                          + f"; rmdir {q(x['src_id'])} 2>/dev/null; true")
+                rr = subprocess.run(remote.ssh_argv(src_sv, script), capture_output=True, text=True, timeout=1800, check=False,
+                                    stdin=subprocess.DEVNULL)
+                if rr.returncode:
+                    raise RuntimeError(f"deleting in {root} on {src_sv['name']} failed: {rr.stderr.strip()}\n" + "\n".join(lines))
+                left, _ = _sizes(src_sv, sp["artifacts"], root, [("c", f"{x['src_id']}/{r}") for r in ok])
+                gone = [r for r in ok if left.get(("c", f"{x['src_id']}/{r}")) is None]
+                freed += sum(a[("c", f"{x['src_id']}/{r}")][1] for r in gone)
+                for r in gone:
+                    x["ckpt_there"].pop(r, None)
+                x["ckpt_done"] -= len(gone)
+                x["ckpt_freed"] = x.get("ckpt_freed", 0) + len(gone)
+                lines.append(f"{x['name']}: deleted {len(gone)} folder(s) in {root}/{x['src_id']}"
+                             + (f", {len(ok) - len(gone)} still there" if len(gone) < len(ok) else ""))
+        return "\n".join(lines) + f"\nfreed {freed / 1e9:.2f} GB on {src_sv['name']}\n"
+
+    shown = (f"for each experiment, on both servers (read-only): the files and bytes of each folder (the script below);\n"
+             f"then on {src_sv['name']}, for the folders identical on {dst_sv['name']} only: cd <checkpoints folder> && rm -rf -- <experiment id>/<run> ...\n"
+             + "\n".join(f"  {x['name']}: {len(x['ckpt_there'])} folder(s) in {x.get('src_root') or sp['checkpoints']}/{x['src_id']}" for x in chosen)
+             + "\n" + SIZE_SCRIPT)
+    return [actions.step(f"delete on {src_sv['name']} {n} checkpoint folder(s) ({size / 1e9:.2f} GB) identical on {dst_sv['name']}",
+                         fn=go, display=shown, timeout=3600)]
 
 
 def _versions(src, dst, runs, sp, dp, d_id):
@@ -612,6 +682,7 @@ def light(plan):
             "experiments": [{"name": x["name"], "src_id": x["src_id"], "dst_id": x["dst_id"], "deleted": x["deleted"], "new": len(x["new"]),
                              "changed": len(x["changed"]), "synced": x["synced"], "old_path": len(x["old_path"]), "files": x["files"], "bytes": x["bytes"],
                              "ckpt": len(x["ckpt"]), "ckpt_bytes": sum(v[1] for v in x["ckpt"].values()), "ckpt_files": sum(v[0] for v in x["ckpt"].values()),
-                             "ckpt_wait": x["ckpt_wait"], "ckpt_done": x["ckpt_done"], "older": bool(x.get("older")), "src_folder": x.get("src_folder"),
+                             "ckpt_wait": x["ckpt_wait"], "ckpt_done": x["ckpt_done"], "older": bool(x.get("older")),
+                             "ckpt_there_bytes": sum(v[1] for v in x.get("ckpt_there", {}).values()), "ckpt_freed": x.get("ckpt_freed", 0), "src_folder": x.get("src_folder"),
                              "old_example": x["old_path"][0]["artifact_uri"] if x["old_path"] else None} for x in plan["experiments"]]}
 
