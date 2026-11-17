@@ -158,6 +158,33 @@ def compute(src, dst, sp, dp):
             "dst_artifacts": dp["sync_artifacts"], "dst_checkpoints": dp["sync_checkpoints"]}
 
 
+def _older_checkpoints(src_sv, sp, dst, known, plan):
+    """Checkpoint folders of the source whose run is not in its database any more (a database of an earlier date) but
+    is in the synchronised one (its results were synced then): checkpoints only, under the run's experiment there.
+    One entry per (folder of the source, experiment of the synchronised database), like an experiment of the plan."""
+    r = subprocess.run(remote.ssh_argv(src_sv, f"cd {shlex.quote(sp['checkpoints'])} 2>/dev/null && ls -d */*/ 2>/dev/null; exit 0"),
+                       capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
+    folders = {}
+    for ln in r.stdout.split():
+        e, _, rid = ln.strip("/").partition("/")
+        if rid and rid not in known:
+            folders[rid] = e
+    plan["unknown_checkpoints"] = 0
+    if not folders:
+        return []
+    rows = _q(dst, "SELECT r.run_uuid, r.experiment_id, e.name FROM runs r JOIN experiments e ON e.experiment_id = r.experiment_id "
+                   "WHERE r.run_uuid = ANY(%s)", (list(folders),))
+    plan["unknown_checkpoints"] = len(folders) - len(rows)
+    out = {}
+    for rid, d_id, name in rows:
+        e = folders[rid]
+        x = out.setdefault((e, str(d_id)), {"name": f"{name} (older database, folder {e})", "src_id": e, "dst_id": str(d_id), "older": True,
+                                            "deleted": False, "new": [], "changed": [], "synced": 0, "synced_runs": [], "old_path": [],
+                                            "bytes": 0, "files": 0})
+        x["synced_runs"].append(rid)
+    return sorted(out.values(), key=lambda x: x["name"])
+
+
 SIZE_SCRIPT = """# for each run folder (kind, path relative to its root), on stdin: whether it exists, its files and bytes
 # (C locale and %.0f: awk would print a large total as 2,15047e+09)
 export LC_ALL=C
@@ -198,6 +225,8 @@ def preview_steps(src_sv, dst_sv):
         with connect(src_sv, "own") as src, connect(dst_sv, "sync") as dst:
             plan = compute(src, dst, sp, dp)
             dst_dir = _q(dst, "SHOW data_directory")[0][0]
+            known = {r[0] for r in _q(src, "SELECT run_uuid FROM runs")}
+            plan["experiments"] += _older_checkpoints(src_sv, sp, dst, known, plan)
         ex = plan["experiments"]
         # results: the artifact folders of the runs to copy; checkpoints: every run's folder, here and (runs already
         # synchronised) on the central server
@@ -227,6 +256,8 @@ def preview_steps(src_sv, dst_sv):
         plan.update(source=src_sv["name"], central=dst_sv["name"], dst_folder=dst_dir, when=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         PLANS[src_sv["name"]] = plan
         lines = [f"synchronised database: {dst_dir}", f"MLflow schema: {plan['schema']} / {plan['schema_dst']}", *plan["blocking"]]
+        if plan.get("unknown_checkpoints"):
+            lines.append(f"{plan['unknown_checkpoints']} checkpoint folder(s) of runs in neither database: left alone")
         for x in plan["experiments"]:
             lines.append(f"{x['name']}: results: {len(x['new'])} new, {len(x['changed'])} changed, {x['synced']} already synced, "
                          f"{len(x['old_path'])} on older paths (left alone), artifacts {x['files']} files {x['bytes'] / 1e9:.2f} GB"
@@ -567,11 +598,11 @@ def light(plan):
     if not plan:
         return None
     keep = ("source", "central", "dst_folder", "when", "schema", "schema_dst", "blocking", "not_copied",
-            "src_artifacts", "src_checkpoints", "dst_artifacts", "dst_checkpoints")
+            "src_artifacts", "src_checkpoints", "dst_artifacts", "dst_checkpoints", "unknown_checkpoints")
     return {**{k: plan.get(k) for k in keep},
             "experiments": [{"name": x["name"], "src_id": x["src_id"], "dst_id": x["dst_id"], "deleted": x["deleted"], "new": len(x["new"]),
                              "changed": len(x["changed"]), "synced": x["synced"], "old_path": len(x["old_path"]), "files": x["files"], "bytes": x["bytes"],
                              "ckpt": len(x["ckpt"]), "ckpt_bytes": sum(v[1] for v in x["ckpt"].values()), "ckpt_files": sum(v[0] for v in x["ckpt"].values()),
-                             "ckpt_wait": x["ckpt_wait"], "ckpt_done": x["ckpt_done"],
+                             "ckpt_wait": x["ckpt_wait"], "ckpt_done": x["ckpt_done"], "older": bool(x.get("older")),
                              "old_example": x["old_path"][0]["artifact_uri"] if x["old_path"] else None} for x in plan["experiments"]]}
 

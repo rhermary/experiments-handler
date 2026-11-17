@@ -512,7 +512,8 @@
     const row = (x) => {
       const can = x.new + x.changed > 0;
       return h('tr', {},
-        h('td', {}, x.name, x.deleted ? h('span', { class: 'hint' }, ' (deleted)') : '', h('div', { class: 'hint' }, x.dst_id ? `id ${x.src_id} → ${x.dst_id}` : `id ${x.src_id} → created`)),
+        h('td', {}, x.name, x.deleted ? h('span', { class: 'hint' }, ' (deleted)') : '', h('div', { class: 'hint', title: x.older ? `Checkpoint folders in ${pv.src_checkpoints}/${x.src_id} whose runs are not in this server's database any more (an earlier one) but are in the synchronised database: their checkpoints can still be synced` : null },
+          x.older ? `checkpoints only: runs of an older database · folder ${x.src_id} → ${x.dst_id}` : x.dst_id ? `id ${x.src_id} → ${x.dst_id}` : `id ${x.src_id} → created`)),
         box(sel, x, can, 'results'), n(x.new, 'sync-new'), n(x.changed, 'sync-chg'), n(x.synced),
         h('td', { class: 'num' + (x.old_path ? '' : ' hint'), title: x.old_example ? `Left alone, e.g. ${x.old_example}` : null }, String(x.old_path || 0)),
         h('td', { class: 'num' + (can ? '' : ' hint') }, can ? `${x.files} · ${gb(x.bytes)}` : '-'),
@@ -531,6 +532,7 @@
         h('tfoot', {}, h('tr', {}, h('td', {}, h('b', {}, 'Selected')), h('td', {}), h('td', { class: 'num' }, String(tot('new', todo))), h('td', { class: 'num' }, String(tot('changed', todo))),
           h('td', {}), h('td', {}), h('td', { class: 'num' }, `${tot('files', todo)} · ${gb(tot('bytes', todo))}`),
           h('td', {}), h('td', { class: 'num' }, `${tot('ckpt', ctodo)} · ${gb(tot('ckpt_bytes', ctodo))}`), h('td', {}), h('td', {}))))),
+      pv.unknown_checkpoints ? h('p', { class: 'hint' }, `${pv.unknown_checkpoints} checkpoint folder(s) of ${pv.src_checkpoints} belong to runs in neither database: left alone.`) : '',
       Object.keys(pv.not_copied || {}).length ? h('p', { class: 'hint' }, 'Not copied (not used by this project): ' + Object.entries(pv.not_copied).map(([k, v]) => `${v} ${k}`).join(', ')) : '',
       h('p', { class: 'hint' }, '"Changed": already synced, but its status, end time, params, tags, last metrics or datasets changed since: copied again. '
         + `"Older paths": artifacts not under ${pv.src_artifacts}: left alone. Checkpoints "Waiting": their run is not synchronised yet (sync its results first); `
