@@ -336,7 +336,9 @@
         actionButton(sv, 'db_stop', 'Stop', { danger: true, confirm: 'Click again to stop', disabled: !sv.connected || !c, args: { which, container: c?.id },
           title: c ? `docker container stop ${c.id}` : 'No container of yours is running' }),
         actionButton(sv, 'db_new', 'New dated database', { confirm: 'Click again to create it', disabled: !sv.connected || !sv.db?.empty_db, args: { which },
-          title: sv.db?.empty_db ? `A copy of ${p.empty_db}` : `${p.empty_db} not found` }),
+          title: !sv.db?.empty_db ? `${p.empty_db} not found` : which === 'own'
+            ? `A copy of ${p.empty_db}. The files of the previous database go with it: ${p.artifacts} and ${p.checkpoints} are moved to <name>_<date of the newest dated folder>, and empty ones are made. Stop the database first.`
+            : `A copy of ${p.empty_db}` }),
         actionButton(sv, 'db_sizes', 'Measure sizes', { disabled: !sv.connected || !folders.length, args: { which }, title: 'du on the folders (can take a while)' })));
   }
 

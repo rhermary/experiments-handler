@@ -227,16 +227,37 @@ def db_stop_steps(sv, which, container):
 
 
 def db_new_steps(sv, which, today):
-    """A new, empty, dated database folder: a copy of _empty_db (as your reset_db.sh --new does)."""
+    """A new, empty, dated database folder: a copy of _empty_db (as your reset_db.sh --new does). For the own
+    database, the files of the runs of the previous one go with it: artifacts and checkpoints are moved to
+    artifacts_<date> and checkpoints_<date> (the date of the newest dated database folder, the one they belong to),
+    and empty ones are made for the new database. Postgres must be stopped (no run writing there meanwhile)."""
     p = core.server_paths(sv)
     q = shlex.quote
     target = f"{p['base']}/{sv['name'].lower()}_{today}_db" if which == "own" else f"{p['synchronised']}/db_{today}"
     lines = [f"test -d {q(p['empty_db'])} || {{ echo 'no {p['empty_db']}' >&2; exit 1; }}",
              f"test ! -e {q(target)} || {{ echo '{target} exists already' >&2; exit 1; }}"]
+    if which == "own":
+        sock, port, pattern, _ = _db(sv, "own")
+        a, c = p["artifacts"].rstrip("/"), p["checkpoints"].rstrip("/")
+        lines += [
+            f"state=$({pg_state(sock, port)})",
+            'if [ "$state" = running ]; then echo "the own database is running: stop it first (its runs would keep writing into the folders moved)" >&2; exit 1; fi',
+            # the newest dated folder: the database the current artifacts and checkpoints belong to
+            f"last=$(ls -d {pattern} 2>/dev/null | sed -nE " + r"'s,.*_([0-9]{4}\.[0-9]{2}\.[0-9]{2})_db$,\1,p'" + " | sort | tail -n 1)",
+            'has() { [ -d "$1" ] && [ -n "$(ls -A "$1" 2>/dev/null)" ]; }',
+            f"if has {q(a)} || has {q(c)}; then",
+            '  if [ -z "$last" ]; then echo "no dated database folder: cannot tell which date the current artifacts and checkpoints belong to" >&2; exit 1; fi',
+            f"  for d in {q(a)}_$last {q(c)}_$last; do if [ -e \"$d\" ]; then echo \"$d exists already: move it away first\" >&2; exit 1; fi; done",
+            f"  if [ -d {q(a)} ]; then mv {q(a)} {q(a)}_$last && echo \"moved {a} -> {a}_$last\"; fi",
+            f"  if [ -d {q(c)} ]; then mv {q(c)} {q(c)}_$last && echo \"moved {c} -> {c}_$last\"; fi",
+            "else echo 'no artifacts or checkpoints to move'; fi",
+            f"mkdir -p {q(a)} {q(c)}"]
     if which == "sync":
         lines.append("mkdir -p " + " ".join(q(p[k]) for k in ("synchronised", "sync_artifacts", "sync_checkpoints", "sync_sock")))
     lines.append(f"cp -r {q(p['empty_db'])} {q(target)}")
-    return [ssh_script(f"create {target.rsplit('/', 1)[-1]} on {sv['name']} (a copy of {p['empty_db'].rsplit('/', 1)[-1]})", sv, "\n".join(lines), timeout=600)]
+    moved = (f", moving {p['artifacts'].rsplit('/', 1)[-1]} and {p['checkpoints'].rsplit('/', 1)[-1]} to <name>_<date of the previous database>"
+             if which == "own" else "")
+    return [ssh_script(f"create {target.rsplit('/', 1)[-1]} on {sv['name']} (a copy of {p['empty_db'].rsplit('/', 1)[-1]}{moved})", sv, "\n".join(lines), timeout=600)]
 
 
 def db_sizes_steps(sv, which):
