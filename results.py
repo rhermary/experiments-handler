@@ -707,6 +707,9 @@ def _artifact_list(client, uri, run_id):
 def artifact_paths(cfg, sel, fresh=False):
     """The artifact files of the selection's runs: [{path, runs (how many have it), size (largest), run_ids}], most
     common first; their files are not read."""
+    if not sources.files_readable():
+        raise ValueError("the runs' files (artifacts) of another server's database cannot be opened from here: "
+                         "artifact views work with Local and Synchronised")
     conf = report_config(cfg, sel, None, fresh)
     df = _runs_df(conf)
     ids = list(df["run_id"]) if len(df) else []
@@ -738,6 +741,9 @@ def _safe_artifact_path(path):
 def artifact_file(cfg, sel, run_id, path, as_png=False):
     """(local file, mimetype) of the artifact `path` of the run `run_id`, which must be a run of the selection; a PDF
     as a PNG of its first page when as_png (Ghostscript). Files are cached next to the settings."""
+    if not sources.files_readable():
+        raise ValueError("the runs' files (artifacts) of another server's database cannot be opened from here: "
+                         "artifact views work with Local and Synchronised")
     import hashlib                                          # pylint: disable=import-outside-toplevel
     import mimetypes                                        # pylint: disable=import-outside-toplevel
     path = _safe_artifact_path(path)

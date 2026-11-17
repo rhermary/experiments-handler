@@ -433,14 +433,15 @@ def api_mlflow_start():
 
 @app.get("/api/source")
 def api_source():
-    """The database the Results and MLflow tabs read: {which: local | sync, central, label}."""
+    """The database the Results and MLflow tabs read: {which: local | sync | own, server, central, servers, label, files}."""
     return jsonify(sources.view(core.load()))
 
 
 @app.post("/api/source")
 def api_source_set():
-    """Read from body {which: local | sync}: opens (or closes) the tunnel to the synchronised database."""
-    return jsonify(sources.select(core.load(), str(request.get_json(force=True).get("which") or "local")))
+    """Read from body {which: local | sync | own, server (own)}: opens (or closes) the tunnel to that database."""
+    body = request.get_json(force=True)
+    return jsonify(sources.select(core.load(), str(body.get("which") or "local"), body.get("server")))
 
 
 @app.get("/api/mlflow/status")

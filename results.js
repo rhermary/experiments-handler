@@ -290,7 +290,8 @@
       fields: [
         { key: 'title', label: 'Title', value: 'Training curves' },
         { key: 'type', type: 'select', label: 'Kind', value: 'curves', options: [{ value: 'curves', label: 'Training curves: metric histories, averaged per group' },
-          { value: 'artifact', label: 'An artifact of each run (a PDF plot, an image, a config...), side by side' }] },
+          R.source?.files === false ? { value: 'artifact', disabled: true, label: `Artifact of each run: not available with ${R.source.label} (its files stay on the server)` }
+            : { value: 'artifact', label: 'An artifact of each run (a PDF plot, an image, a config...), side by side' }] },
         { key: 'source', type: 'select', label: 'Runs', value: source,
           options: [{ value: '', label: `The runs of ${C.experiment}` }, ...links.map((l) => ({ value: l.name, label: `The runs linked by ${l.name} (${l.param})` }))] },
         { type: 'note', label: 'Training curves: the metrics, groups (color, panels) and smoothing are set in the view. Artifact: the file is chosen in the view, among the artifacts of the runs (Runs: the runs of the selection). Each view has its own text explaining it, shown above it.' },
@@ -1171,7 +1172,11 @@
     let body;
     if (R.view.startsWith('v:') && !curView()) R.view = 'table';           // a view deleted meanwhile
     const view = curView();
-    if (view?.type === 'artifact') body = h('div', {}, artifactControls(view), artifactGrid(view));
+    if (view?.type === 'artifact') {
+      body = R.source?.files === false
+        ? h('div', { class: 'db-warn' }, h('b', {}, `Artifact views are not available on ${R.source.label}. `), NO_FILES)
+        : h('div', {}, artifactControls(view), artifactGrid(view));
+    }
     else if (view) {
       const left = h('div', { class: 'rs-side' }, h('div', { class: 'rs-side-head' }, h('h3', {}, 'Preview'), h('span', { class: 'hint' }, 'Computed by the launcher')),
         curvesPreview(view));
@@ -1218,30 +1223,37 @@
   /* ---------- the database read by the Results and MLflow tabs: local, or the synchronised one of the central
      server (through a tunnel the launcher opens when you choose it: sources.py) ---------- */
 
+  /* the database: Local, Synchronised, or the own database of a server (its runs' files stay there: no artifacts) */
+  const NO_FILES = "The runs' files (artifacts) of a server's own database stay on that server: they cannot be opened from here "
+    + '(no artifact view, and the MLflow UI cannot open them). Use Local or Synchronised for those.';
   function sourceSwitch() {
     const s = R.source;
-    const b = (which, label, title) => h('button', {
-      type: 'button', 'aria-pressed': String(s?.which === which), title,
+    const b = (which, label, title, server) => h('button', {
+      type: 'button', 'aria-pressed': String(s?.which === which && (which !== 'own' || s?.server === server)), title,
       // h() sets every attribute it is given (disabled="false" disables): null leaves it out
-      disabled: R.switching || (which === 'sync' && s && !s.central) ? '' : null, onclick: () => pickSource(which),
+      disabled: R.switching || (which === 'sync' && s && !s.central) ? '' : null, onclick: () => pickSource(which, server),
     }, label);
-    return h('span', { class: 'seg src-switch', role: 'group', 'aria-label': 'Database', title: s ? `Reading: ${s.label}` : '' },
+    const others = (s?.servers || []).filter((n) => n !== s?.central);
+    const seg = h('span', { class: 'seg src-switch', role: 'group', 'aria-label': 'Database', title: s ? `Reading: ${s.label}` : '' },
       b('local', 'Local', 'The MLflow tracking URI of the Settings'),
-      b('sync', 'Synchronised', s?.central ? `The synchronised database on ${s.central} (connect it in Servers first)` : 'No central server in the settings'));
+      b('sync', 'Synchronised', s?.central ? `The synchronised database on ${s.central} (connect it in Servers first)` : 'No central server in the settings'),
+      ...others.map((n) => b('own', n, `The own database of ${n} (connect it in Servers first; its database must run). ${NO_FILES}`, n)));
+    return s && s.files === false ? h('span', { class: 'src-wrap' }, seg, h('span', { class: 'src-nofiles', title: NO_FILES }, 'No artifacts')) : seg;
   }
 
-  async function pickSource(which) {
+  async function pickSource(which, server) {
     if (!R.source) await fetchSource();
-    if (!R.source || R.source.which === which || R.switching) return;
+    if (!R.source || R.switching || (R.source.which === which && (which !== 'own' || R.source.server === server))) return;
     R.switching = true;
-    status(which === 'sync' ? `Opening a tunnel to the synchronised database on ${R.source.central}...` : 'Back to the local database...');
+    const target = which === 'sync' ? `the synchronised database on ${R.source.central}` : which === 'own' ? `the database of ${server}` : 'the local database';
+    status(which === 'local' ? 'Back to the local database...' : `Opening a tunnel to ${target}...`);
     if (R.tab === 'mlflow') $('#mlflowtab').replaceChildren(h('p', { class: 'empty' }, 'Changing the database...'));
     else paint();
     let ok = true;
     R.switchError = '';
-    try { R.source = await api('/api/source', { which }); status(`Results and MLflow tabs: ${R.source.label}`); } catch (e) {
+    try { R.source = await api('/api/source', { which, server }); status(`Results and MLflow tabs: ${R.source.label}` + (R.source.files ? '' : ' (no artifacts: they stay on the server)')); } catch (e) {
       ok = false;
-      R.switchError = `Could not switch to the ${which === 'sync' ? `synchronised database on ${R.source.central}` : 'local database'}: ${e.message}`;
+      R.switchError = `Could not switch to ${target}: ${e.message}`;
       status(R.switchError, true);
     }
     R.switching = false;
@@ -1309,6 +1321,7 @@
       });
       box.replaceChildren(h('div', { class: 'mlflow-bar' },
         h('span', { class: 'hint' }, `MLflow server started by the launcher (${R.source?.label || cfg.project.tracking_uri.split('?')[0]}${mlflowImage ? `, in ${mlflowImage}` : ''})`),
+        R.source?.files === false ? h('span', { class: 'src-nofiles', title: NO_FILES }, "Run files can't be opened") : '',
         h('span', { class: 'sp' }), sourceSwitch(),
         h('button', { type: 'button', class: 'tiny', onclick: () => { frame.src = base + '#/experiments'; } }, 'Experiments'),
         h('a', { class: 'tiny', href: base, target: '_blank', rel: 'noopener' }, 'Open in a New Tab')), frame);

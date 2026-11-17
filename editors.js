@@ -128,7 +128,7 @@ function openDialog({ title, fields, onSubmit, remove, wide = false, submitLabel
     let el;
     if (f.type === 'area') el = h('textarea', { spellcheck: 'false', rows: String(f.rows || 6) });
     else if (f.type === 'yaml') el = autoGrow(h('textarea', { spellcheck: 'false', class: 'grow' }), f.rows || 1);
-    else if (f.type === 'select') el = h('select', {}, ...f.options.map((o) => h('option', { value: o.value }, o.label)));
+    else if (f.type === 'select') el = h('select', {}, ...f.options.map((o) => h('option', { value: o.value, disabled: o.disabled ? '' : null }, o.label)));
     else if (f.type === 'check') el = h('input', { type: 'checkbox' });
     else if (f.type === 'pairs') el = pairsField(f);
     else el = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false' });
