@@ -938,8 +938,8 @@ function listBody(b) {
   };
   const mode = all ? h('div', { class: 'seg lb-mode', role: 'group', 'aria-label': `How ${b.label} is used` },
     h('button', { type: 'button', 'aria-pressed': String(looping), title: `Run the command loop once per value ($${name} -> \${${lv}})`, onclick: () => set(all.name) }, `\u21bb Loop over All ${values.length}`),
-    h('button', { type: 'button', 'aria-pressed': String(!looping), title: 'Tick the values to use: one sets the variable, several are looped over',
-      onclick: () => { if (looping) set([values[0].name]); } }, looping ? 'Selected' : `Selected (${picked.length})`)) : '';
+    h('button', { type: 'button', 'aria-pressed': String(!looping), title: 'Tick the values to use: one sets the variable, several are looped over (from the loop: all ticked, untick the ones to leave out)',
+      onclick: () => { if (looping) set(values.map((r) => r.name)); } }, looping ? 'Selected' : `Selected (${picked.length})`)) : '';
   const n = picked.length;
   const say = looping || n > 1
     ? h('p', { class: 'lb-say loop' }, `The whole command loop runs once per ${looping ? '' : 'ticked '}value (`, h('b', {}, `${n}\u00d7`), '), as the outermost loop: ',
@@ -956,7 +956,8 @@ function listBody(b) {
           h('span', { class: 'lb-text' }, h('span', { class: 'name' }, it.label || it.value), it.label ? h('code', {}, it.value) : '')));
     }));
   const tools = all && !looping ? h('div', { class: 'lb-tools' },
-    h('button', { type: 'button', class: 'tiny', onclick: () => set(all.name) }, 'All'),
+    h('button', { type: 'button', class: 'tiny', title: 'Tick every value (then untick the ones to leave out)', disabled: n === values.length ? '' : null,
+      onclick: () => set(values.map((r) => r.name)) }, 'Tick All'),
     h('button', { type: 'button', class: 'tiny', onclick: () => set([values[0].name]) }, 'Only the First'),
     h('span', { class: 'hint' }, `${n} of ${values.length}`)) : '';
   return h('div', { class: 'lb' }, mode, say, tools, list);
@@ -985,8 +986,16 @@ function drawStrip() {
   else cards.push(h('div', { class: 'empty' }, 'No XP yet. Create one in the side panel.'));
   const strip = $('#strip');
   const left = strip.scrollLeft;
+  // a redraw keeps where each card's lists were scrolled, and the focus on the row clicked
+  const scrolled = [...strip.querySelectorAll('.card[data-bid] .rows, .card[data-bid] .card-vars')]
+    .filter((el) => el.scrollTop).map((el) => [el.closest('.card').dataset.bid, el.classList.contains('rows') ? '.rows' : '.card-vars', el.scrollTop]);
+  const act = document.activeElement;
+  const focus = strip.contains(act) && act.closest('.item[data-row]') ? [act.closest('.card').dataset.bid, act.closest('.item').dataset.row] : null;
   strip.replaceChildren(...cards);
   strip.scrollLeft = left;
+  const card = (bid) => [...strip.querySelectorAll('.card[data-bid]')].find((c) => c.dataset.bid === bid);
+  for (const [bid, sel, top] of scrolled) { const el = card(bid)?.querySelector(sel); if (el) el.scrollTop = top; }
+  if (focus) [...(card(focus[0])?.querySelectorAll('.item[data-row]') || [])].find((it) => it.dataset.row === focus[1])?.querySelector('button')?.focus({ preventScroll: true });
 }
 
 function syncChips() {
