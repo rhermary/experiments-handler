@@ -161,14 +161,18 @@ def compute(src, dst, sp, dp):
 def _older_checkpoints(src_sv, sp, dst, known, plan):
     """Checkpoint folders of the source whose run is not in its database any more (a database of an earlier date) but
     is in the synchronised one (its results were synced then): checkpoints only, under the run's experiment there.
-    One entry per (folder of the source, experiment of the synchronised database), like an experiment of the plan."""
-    r = subprocess.run(remote.ssh_argv(src_sv, f"cd {shlex.quote(sp['checkpoints'])} 2>/dev/null && ls -d */*/ 2>/dev/null; exit 0"),
+    Looked for in <checkpoints> and in <checkpoints>_* (where a new database moved the folders of the previous one).
+    One entry per (folder of the source, experiment of the synchronised database), like an experiment of the plan, with
+    its root (src_root)."""
+    parent, base = sp["checkpoints"].rstrip("/").rsplit("/", 1)
+    q = shlex.quote
+    r = subprocess.run(remote.ssh_argv(src_sv, f"cd {q(parent)} 2>/dev/null && ls -d {q(base)}/*/*/ {q(base)}_*/*/*/ 2>/dev/null; exit 0"),
                        capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL)
     folders = {}
     for ln in r.stdout.split():
-        e, _, rid = ln.strip("/").partition("/")
-        if rid and rid not in known:
-            folders[rid] = e
+        root, e, rid = (ln.strip("/").split("/") + ["", ""])[:3]
+        if rid and rid not in known and rid not in folders:
+            folders[rid] = (root, e)
     plan["unknown_checkpoints"] = 0
     if not folders:
         return []
@@ -177,8 +181,9 @@ def _older_checkpoints(src_sv, sp, dst, known, plan):
     plan["unknown_checkpoints"] = len(folders) - len(rows)
     out = {}
     for rid, d_id, name in rows:
-        e = folders[rid]
-        x = out.setdefault((e, str(d_id)), {"name": f"{name} (older database, folder {e})", "src_id": e, "dst_id": str(d_id), "older": True,
+        root, e = folders[rid]
+        x = out.setdefault((root, e, str(d_id)), {"name": f"{name} (older database, {root}/{e})", "src_id": e, "dst_id": str(d_id), "older": True,
+                                            "src_root": f"{parent}/{root}", "src_folder": f"{root}/{e}",
                                             "deleted": False, "new": [], "changed": [], "synced": 0, "synced_runs": [], "old_path": [],
                                             "bytes": 0, "files": 0})
         x["synced_runs"].append(rid)
@@ -231,8 +236,11 @@ def preview_steps(src_sv, dst_sv):
         # results: the artifact folders of the runs to copy; checkpoints: every run's folder, here and (runs already
         # synchronised) on the central server
         items = [("a", f"{x['src_id']}/{r}") for x in ex for r in x["new"] + x["changed"]]
-        items += [("c", f"{x['src_id']}/{r}") for x in ex for r in x["new"] + x["changed"] + x["synced_runs"]]
+        items += [("c", f"{x['src_id']}/{r}") for x in ex if not x.get("src_root") for r in x["new"] + x["changed"] + x["synced_runs"]]
         sizes, _ = _sizes(src_sv, sp["artifacts"], sp["checkpoints"], items)
+        for root in {x["src_root"] for x in ex if x.get("src_root")}:     # older databases' folders (run ids are unique)
+            sizes.update(_sizes(src_sv, sp["artifacts"], root,
+                                [("c", f"{x['src_id']}/{r}") for x in ex if x.get("src_root") == root for r in x["synced_runs"]])[0])
         there = [("c", f"{x['dst_id']}/{r}") for x in ex if x["dst_id"] for r in x["changed"] + x["synced_runs"]]
         sizes_c, _ = _sizes(dst_sv, dp["sync_artifacts"], dp["sync_checkpoints"], there)
         for x in ex:
@@ -314,11 +322,11 @@ def _rebase(path, old, new):
     return new + p[len(old):] if old and p.startswith(old) else path
 
 
-def _files_cmd(src_sv, dst_sv, kind, src_id, d_id, runs):
+def _files_cmd(src_sv, dst_sv, kind, src_id, d_id, runs, src_root=None):
     """Copy of run folders of one experiment and one kind (a: artifacts, c: checkpoints), renamed under the experiment
     id of the synchronised database: (bash pipeline, its stdin: the folders)."""
     sp, dp = core.server_paths(src_sv), core.server_paths(dst_sv)
-    s_root, d_root = (sp["artifacts"], dp["sync_artifacts"]) if kind == "a" else (sp["checkpoints"], dp["sync_checkpoints"])
+    s_root, d_root = (sp["artifacts"], dp["sync_artifacts"]) if kind == "a" else (src_root or sp["checkpoints"], dp["sync_checkpoints"])
     q = shlex.quote
     mkdir = f"mkdir -p {q(d_root)}"
     untar = f"tar -C {q(d_root)} -xf - --transform=s,^{src_id}/,{d_id}/,"
@@ -332,7 +340,7 @@ def _files_cmd(src_sv, dst_sv, kind, src_id, d_id, runs):
     return "set -o pipefail; " + cmd, "".join(f"{src_id}/{r}\n" for r in runs)
 
 
-def _copy_step(src_sv, dst_sv, kind, name, src_id, get_id, get_runs, n, size):
+def _copy_step(src_sv, dst_sv, kind, name, src_id, get_id, get_runs, n, size, src_root=None):
     """A step copying run folders (get_id, get_runs: resolved when it runs: the experiment id may be created by then)."""
     what = "artifacts" if kind == "a" else "checkpoints"
 
@@ -340,26 +348,27 @@ def _copy_step(src_sv, dst_sv, kind, name, src_id, get_id, get_runs, n, size):
         runs = get_runs()
         if not runs:
             return f"no {what} folder to copy\n"
-        cmd, stdin = _files_cmd(src_sv, dst_sv, kind, src_id, get_id(), runs)
+        cmd, stdin = _files_cmd(src_sv, dst_sv, kind, src_id, get_id(), runs, src_root)
         r = subprocess.run(["bash", "-c", cmd], input=stdin, capture_output=True, text=True, timeout=24 * 3600, check=False)
         if r.returncode:
             raise RuntimeError(f"copy failed (exit {r.returncode}): {r.stderr.strip()}")
         return f"$ {cmd} <<'EOF'\n{stdin}EOF\n{r.stdout}{r.stderr}copied {len(runs)} folder(s)\n"
     runs = get_runs()
-    cmd, stdin = _files_cmd(src_sv, dst_sv, kind, src_id, get_id() or "<new id>", runs) if runs else (None, None)
+    cmd, stdin = _files_cmd(src_sv, dst_sv, kind, src_id, get_id() or "<new id>", runs, src_root) if runs else (None, None)
     shown = (f"{cmd} <<'EOF'\n{stdin}EOF" if cmd else f"no {what} folder to copy") + \
             ("\n# <new id>: the id the experiment gets in the synchronised database (step above)" if cmd and "<new id>" in cmd else "")
     return actions.step(f"copy the {what} of {name} ({n} run folders, {size / 1e9:.2f} GB) to {dst_sv['name']}", fn=go, display=shown, timeout=24 * 3600)
 
 
 def _check_folders(src_sv, dst_sv, groups):
-    """groups: [(name, kind, src_id, d_id, runs)]: the folders on both servers must have the same files and bytes."""
+    """groups: [(name, kind, src_id, d_id, runs[, checkpoints root of the source])]: the folders on both servers must
+    have the same files and bytes."""
     sp, dp = core.server_paths(src_sv), core.server_paths(dst_sv)
     out, bad = [], []
-    for name, kind, src_id, d_id, runs in groups:
+    for name, kind, src_id, d_id, runs, *root in groups:
         if not runs:
             continue
-        s, _ = _sizes(src_sv, sp["artifacts"], sp["checkpoints"], [(kind, f"{src_id}/{r}") for r in runs])
+        s, _ = _sizes(src_sv, sp["artifacts"], (root and root[0]) or sp["checkpoints"], [(kind, f"{src_id}/{r}") for r in runs])
         d, _ = _sizes(dst_sv, dp["sync_artifacts"], dp["sync_checkpoints"], [(kind, f"{d_id}/{r}") for r in runs])
         what = "artifacts" if kind == "a" else "checkpoints"
         for r in runs:
@@ -551,9 +560,9 @@ def ckpt_steps(src_sv, dst_sv, names):
     if not chosen:
         raise ValueError("no checkpoint to copy in the experiments chosen")
     steps = [_copy_step(src_sv, dst_sv, "c", x["name"], x["src_id"], lambda x=x: x["dst_id"], lambda x=x: list(x["ckpt"]),
-                        len(x["ckpt"]), sum(v[1] for v in x["ckpt"].values())) for x in chosen]
+                        len(x["ckpt"]), sum(v[1] for v in x["ckpt"].values()), x.get("src_root")) for x in chosen]
     steps.append(actions.step(f"check the checkpoints: the folders copied, on {src_sv['name']} and on {dst_sv['name']}", timeout=3600,
-                              fn=lambda: _check_folders(src_sv, dst_sv, [(x["name"], "c", x["src_id"], x["dst_id"], list(x["ckpt"])) for x in chosen]),
+                              fn=lambda: _check_folders(src_sv, dst_sv, [(x["name"], "c", x["src_id"], x["dst_id"], list(x["ckpt"]), x.get("src_root")) for x in chosen]),
                               display=f"on both servers (ssh, read-only): for each folder copied, its number of files and bytes (find -printf %s): they must be identical\n{SIZE_SCRIPT}"))
     return steps
 
@@ -603,6 +612,6 @@ def light(plan):
             "experiments": [{"name": x["name"], "src_id": x["src_id"], "dst_id": x["dst_id"], "deleted": x["deleted"], "new": len(x["new"]),
                              "changed": len(x["changed"]), "synced": x["synced"], "old_path": len(x["old_path"]), "files": x["files"], "bytes": x["bytes"],
                              "ckpt": len(x["ckpt"]), "ckpt_bytes": sum(v[1] for v in x["ckpt"].values()), "ckpt_files": sum(v[0] for v in x["ckpt"].values()),
-                             "ckpt_wait": x["ckpt_wait"], "ckpt_done": x["ckpt_done"], "older": bool(x.get("older")),
+                             "ckpt_wait": x["ckpt_wait"], "ckpt_done": x["ckpt_done"], "older": bool(x.get("older")), "src_folder": x.get("src_folder"),
                              "old_example": x["old_path"][0]["artifact_uri"] if x["old_path"] else None} for x in plan["experiments"]]}
 

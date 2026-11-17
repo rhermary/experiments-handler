@@ -514,8 +514,8 @@
     const row = (x) => {
       const can = x.new + x.changed > 0;
       return h('tr', {},
-        h('td', {}, x.name, x.deleted ? h('span', { class: 'hint' }, ' (deleted)') : '', h('div', { class: 'hint', title: x.older ? `Checkpoint folders in ${pv.src_checkpoints}/${x.src_id} whose runs are not in this server's database any more (an earlier one) but are in the synchronised database: their checkpoints can still be synced` : null },
-          x.older ? `checkpoints only: runs of an older database · folder ${x.src_id} → ${x.dst_id}` : x.dst_id ? `id ${x.src_id} → ${x.dst_id}` : `id ${x.src_id} → created`)),
+        h('td', {}, x.name, x.deleted ? h('span', { class: 'hint' }, ' (deleted)') : '', h('div', { class: 'hint', title: x.older ? `Checkpoint folders in ${x.src_folder || pv.src_checkpoints + '/' + x.src_id} whose runs are not in this server's database any more (an earlier one) but are in the synchronised database: their checkpoints can still be synced` : null },
+          x.older ? `checkpoints only: runs of an older database · ${x.src_folder || x.src_id} → ${x.dst_id}` : x.dst_id ? `id ${x.src_id} → ${x.dst_id}` : `id ${x.src_id} → created`)),
         box(sel, x, can, 'results'), n(x.new, 'sync-new'), n(x.changed, 'sync-chg'), n(x.synced),
         h('td', { class: 'num' + (x.old_path ? '' : ' hint'), title: x.old_example ? `Left alone, e.g. ${x.old_example}` : null }, String(x.old_path || 0)),
         h('td', { class: 'num' + (can ? '' : ' hint') }, can ? `${x.files} · ${gb(x.bytes)}` : '-'),
