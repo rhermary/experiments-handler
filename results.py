@@ -20,6 +20,7 @@ import time
 
 
 import core
+import marks
 import mlflow_ui
 import preview
 import sources
@@ -579,6 +580,7 @@ def report_preview(cfg, sel, dimensions=None, fresh=False):
         except ValueError as err:
             excluded_error = str(err)
     return {"config": conf, "order": order, "counts": counts, "summary": s, "latex": T.latex_table(s, conf),
+            "marks": marks.for_results(cfg, sel, conf),
             "runs": [record(r) for r in runs], "excluded": excluded, "excluded_error": excluded_error,
             "params": sorted(c for c in df.columns if c.startswith("params.")),
             "available_metrics": sorted(c[len("metrics."):] for c in df.columns if c.startswith("metrics.")),

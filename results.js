@@ -705,6 +705,23 @@
 
   /* ---------- left: preview ---------- */
 
+  /* marks on the cells ("a result is coming", marks.py): the launches made from here (each option they ran) and the
+     cells marked by hand; shown on a cell without runs. A mark's cell may leave out a dimension (any value). */
+  // two cells that can be the same: equal on the dimensions they both have (a dimension not arranged: any value)
+  const compatible = (a, b) => Object.keys(a).every((k) => !(k in b) || a[k] === b[k]);
+  function marksOf(vals) {
+    const M2 = R.data.marks || { marks: [], cleared: [] };
+    return M2.marks.filter((m) => compatible(m.cell, vals)
+      && (m.kind === 'manual' || !M2.cleared.some((c) => compatible(c, vals) && compatible(c, m.cell))));
+  }
+  async function toggleMark(vals, on) {
+    try { await api('/api/report/mark', { sel: selq(), cell: vals, on }); } catch (e) { status(e.message, true); return; }
+    load(false);
+  }
+  const markText = (ms) => ms.map((m) => (m.kind === 'manual' ? `Marked by hand${m.when ? `, ${m.when}` : ''}`
+    : m.kind === 'queued' ? `Queued for ${m.server} (${m.where})${m.when ? `, ${m.when}` : ''}`
+    : `Launched on ${m.server}, ${m.when}${m.where ? ` (${m.where})` : ''}`)).join('\n');
+
   function previewTable() {
     const s = R.data.summary, M = metricList();
     if (!s || !s.panels.length) return h('p', { class: 'empty' }, 'No run to show.');
@@ -715,13 +732,29 @@
       const head2 = s.columns.flatMap(() => M.map((m) => h('th', { class: 'num' }, m.label)));
       const body = p.rows.map((row, ri) => h('tr', {},
         ...row.values.map((v, i) => h('td', { class: 'rd' + (ri && i < row.values.length - 1 && p.rows[ri - 1].values.slice(0, i + 1).join('\u0000') === row.values.slice(0, i + 1).join('\u0000') ? ' rep' : '') }, v)),
-        ...s.columns.flatMap((c) => M.map((m, mi) => {
-          const x = row.cells[c]?.[m.key];
-          const b = p.best[`${c}\u0000${m.key}`];
-          const best = x && b != null && Math.abs(x.mean - b) < 1e-9;
-          return h('td', { class: 'num' + (mi === 0 ? ' first' : '') + (best ? ' best' : '') + (x ? '' : ' missing'), title: x ? `n=${x.n}` : 'No run' },
-            ...(x ? [fmt(x.mean), lay().std && x.sd != null ? h('small', {}, ' ±' + fmt(x.sd)) : '', x.n > 1 ? h('sup', {}, String(x.n)) : ''] : ['—']));
-        }))));
+        ...s.columns.flatMap((c) => {
+          // the cell (panel, rows, column values): marked when it has no run yet
+          const vals = {};
+          if (s.panel) vals[s.panel] = p.value;
+          s.rows.forEach((d, i) => { vals[d] = row.values[i]; });
+          if (s.column) vals[s.column] = c;
+          const empty = M.every((m) => !row.cells[c]?.[m.key]);
+          const ms = empty ? marksOf(vals) : [];
+          const kind = ms.some((m) => m.kind === 'manual') ? 'marked' : ms.some((m) => m.kind === 'launch') ? 'launched'
+            : ms.length ? 'queued' : '';
+          return M.map((m, mi) => {
+            const x = row.cells[c]?.[m.key];
+            const b = p.best[`${c}\u0000${m.key}`];
+            const best = x && b != null && Math.abs(x.mean - b) < 1e-9;
+            if (!x && empty) {
+              return h('td', { class: 'num missing markable' + (mi === 0 ? ' first' : '') + (kind ? ' ' + kind : ''),
+                title: (kind ? markText(ms) + '\n\nClick to clear' : 'No run. Click to mark it: a result is coming'),
+                onclick: () => toggleMark(vals, !kind) }, mi === 0 && kind ? kind : '—');
+            }
+            return h('td', { class: 'num' + (mi === 0 ? ' first' : '') + (best ? ' best' : '') + (x ? '' : ' missing'), title: x ? `n=${x.n}` : 'No run' },
+              ...(x ? [fmt(x.mean), lay().std && x.sd != null ? h('small', {}, ' ±' + fmt(x.sd)) : '', x.n > 1 ? h('sup', {}, String(x.n)) : ''] : ['—']));
+          });
+        })));
       out.push(h('div', { class: 'rs-panel' }, s.panel ? h('h3', {}, `${s.panel}: ${p.value}`) : '',
         h('div', { class: 'rs-scroll' }, h('table', { class: 'rs-table' }, h('thead', {}, h('tr', {}, ...head1), h('tr', {}, ...head2)), h('tbody', {}, ...body)))));
     }
@@ -1166,6 +1199,21 @@
     drawStrip();                                  // the launcher flags the options without runs
     window.dispatchEvent(new Event('xp-state'));  // router.js: the selection or view may have changed
   }
+
+  /* the marks follow the queue and the launches without reloading the runs: re-read every MARKS_S while the
+     table is shown (and the page visible), repainted when they changed */
+  const MARKS_S = 15;
+  let marksBusy = false;
+  setInterval(async () => {
+    if (marksBusy || R.tab !== 'results' || R.view !== 'table' || !R.data?.summary || R.loading || document.hidden || !st.xp
+      || document.querySelector('#results :is(input, textarea, select):focus, dialog[open]')) return;   // not while typing
+    marksBusy = true;
+    const gen = loadGen, data = R.data;
+    try {
+      const m = await api('/api/report/marks', { sel: selq() });
+      if (gen === loadGen && R.data === data && JSON.stringify(m) !== JSON.stringify(data.marks)) { data.marks = m; paint(); }
+    } catch (e) { /* the next tick, or Refresh, tells */ } finally { marksBusy = false; }
+  }, MARKS_S * 1000);
 
   /* ---------- the database read by the Results and MLflow tabs: local, or the synchronised one of the central
      server (through a tunnel the launcher opens when you choose it: sources.py) ---------- */

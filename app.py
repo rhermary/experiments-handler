@@ -29,6 +29,7 @@ import sync
 import xpqueue
 import gpus
 import jobs
+import marks
 import mlflow_ui
 import picker
 import preview
@@ -345,6 +346,27 @@ def api_report_preview():
     return _report_errors(run)
 
 
+@app.post("/api/report/marks")
+def api_report_marks():
+    """The marks of the Results table only (marks.py), for the page to follow the queue and the launches: body {sel}."""
+    sel = request.get_json(force=True)["sel"]
+
+    def run():
+        cfg = core.load()
+        return jsonify(marks.for_results(cfg, sel, results.report_config(cfg, sel)))
+    return _report_errors(run)
+
+
+@app.post("/api/report/mark")
+def api_report_mark():
+    """Mark a cell of the Results table by hand ("a result is coming"), or clear its marks: body {sel, cell
+    {dimension: value}, on}."""
+    body = request.get_json(force=True)
+    sel = body["sel"]
+    marks.set_mark(sel, results.report_config(core.load(), sel)["selection"], body.get("cell"), bool(body.get("on")))
+    return jsonify(ok=True)
+
+
 @app.post("/api/report/run")
 def api_report_run():
     """Run the report script of the XP (written from the saved settings) for table | plot | preview."""
@@ -534,6 +556,8 @@ def _launch_remote(cfg, sel, sv):
         try:
             done["res"], done["folder"] = remote_launch.launch(cfg, sv, path.read_text(), sel["xp"], config,
                                                                 remote_launch.image_of(table))
+            if done["res"]["ok"]:                             # started: its cells of the Results are marked
+                marks.record_launch(cfg, sel, sv["name"], done["folder"])
         except Exception as err:  # pylint: disable=broad-except  # shown in the page
             done["error"] = f"{type(err).__name__}: {err}" if not isinstance(err, ValueError) else str(err)
     worker = threading.Thread(target=run, daemon=True, name=f"launch-{sv['name']}")
@@ -565,7 +589,10 @@ def api_launch():
         out, _ = proc.communicate(timeout=LAUNCH_WAIT_S)
     except subprocess.TimeoutExpired:  # e.g. DEBUG=1 stays attached to the container
         threading.Thread(target=proc.communicate, daemon=True).start()  # keep draining the pipe
+        marks.record_launch(cfg, sel, None, _rel(cfg, path))
         return jsonify(path=_rel(cfg, path), running=True, pid=proc.pid, output="")
+    if proc.returncode == 0:                                  # started: its cells of the Results are marked
+        marks.record_launch(cfg, sel, None, _rel(cfg, path))
     return jsonify(path=_rel(cfg, path), running=False, returncode=proc.returncode, output=out)
 
 

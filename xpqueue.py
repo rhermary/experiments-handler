@@ -25,6 +25,7 @@ from datetime import datetime
 
 import core
 import gpus
+import marks
 import remote
 import remote_launch
 
@@ -106,6 +107,7 @@ def add(cfg, sel, mode="auto", count=None, manual=False, server=None):
             "server": server or None,                           # checked above (remote.server)
             "config": (table.get(cfg["project"]["config_var"]) or {}).get("value", "").strip(),
             "image": remote_launch.image_of(table),
+            "blocks": sel.get("blocks") or {},                  # what it runs: its cells of the Results (marks.py)
             "created": datetime.now().isoformat(timespec="seconds")}
     with _LOCK:
         data = _load()
@@ -211,8 +213,11 @@ def _launch(cfg, item, gpu_list):
     except subprocess.TimeoutExpired:
         threading.Thread(target=proc.communicate, daemon=True).start()
         item.update(status="started", output="(still running after the launch wait)")
+        marks.record_launch(cfg, {"xp": item["xp"], "blocks": item.get("blocks") or {}}, None, item.get("path", ""))
         return
     item.update(status="started" if proc.returncode == 0 else "failed", returncode=proc.returncode, output=out[-4000:])
+    if proc.returncode == 0:
+        marks.record_launch(cfg, {"xp": item["xp"], "blocks": item.get("blocks") or {}}, None, item.get("path", ""))
 
 
 def _launch_remote(cfg, item, gpu_list):
@@ -226,6 +231,8 @@ def _launch_remote(cfg, item, gpu_list):
             res, folder = remote_launch.launch(cfg, sv, script, item["xp"], item.get("config", ""), item.get("image", ""))
             upd = {"status": "started" if res["ok"] else "failed", "output": remote_launch.output_of(res)[-4000:],
                    "action": res["id"], "folder": folder}
+            if res["ok"]:
+                marks.record_launch(cfg, {"xp": item["xp"], "blocks": item.get("blocks") or {}}, sv["name"], folder)
         except Exception as err:  # pylint: disable=broad-except
             upd = {"status": "failed", "output": f"{type(err).__name__}: {err}"}
         with _LOCK:
